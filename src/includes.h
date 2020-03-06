@@ -23,6 +23,7 @@
 #include <EEPROM.h>
 #include <ArduinoJson.h>
 
+#include <ArduinoJson.h>
 #include <TimeLib.h>
 #include <Time.h>
 #include <Timezone.h>

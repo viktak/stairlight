@@ -57,6 +57,7 @@ unsigned long sendNTPpacket(IPAddress& address) {
   udp.beginPacket(address, 123); // NTP requests are to port 123
   udp.write(packetBuffer, NTP_PACKET_SIZE);
   udp.endPacket();
+  return 0;
 }
 
 // NTP Time Provider Code

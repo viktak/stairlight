@@ -40,6 +40,20 @@
                     </div>
 
                     <div class="form-group">
+                        <label class="control-label col-sm-2" for="friendlyname">Friendly name of node:</label>
+                        <div class="col-sm-10">
+                            <input type="text" class="form-control" id="friendlyname" name="friendlyname" placeholder="Enter a friendly name for the node" value="%friendlyname%" maxlength="30">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="control-label col-sm-2" for="heartbeatinterval">Send heartbeat</label>
+                        <div class="col-sm-10">
+                            <input type="text" class="form-control" id="heartbeatinterval" name="heartbeatinterval" placeholder="Heartbeat frequency" value="%heartbeatinterval%" maxlength="4">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
                         <label class="control-label col-sm-2" for="timezoneselector">Time zone:</label>
                         <div class="col-sm-10">
                           <select class="form-control" name="timezoneselector" id="timezoneselector">
@@ -52,7 +66,6 @@
                 </div>
 
             </div>
-
             <div class="panel panel-default">
                 <div class="panel-heading">MQTT broker</div>
                 <div class="panel-body">
@@ -69,6 +82,12 @@
                         <label class="control-label col-sm-2" for="mqttport">MQTT port:</label>
                         <div class="col-sm-10">
                             <input type="number" class="form-control" id="mqttport" name="mqttport" placeholder="Enter port number" value="%mqtt-port%">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="control-label col-sm-2" for="mqtttopic">MQTT topic:</label>
+                        <div class="col-sm-10">
+                            <input type="text" class="form-control" id="mqtttopic" name="mqtttopic" placeholder="Enter a topic" value="%mqtt-topic%" maxlength="32">
                         </div>
                     </div>
                 </div>

@@ -14,7 +14,7 @@ ESP8266WebServer server(80);
 WiFiClient wclient;
 PubSubClient PSclient(wclient);
 
-//  Timers
+//  Timers and their flags
 os_timer_t heartbeatTimer;
 os_timer_t sunDataTimer;
 
@@ -43,7 +43,7 @@ bool ntpInitialized = false;
 
 // Daylight savings time rules for Greece
 TimeChangeRule myDST = {"MDT", Fourth, Sun, Mar, 2, DST_TIMEZONE_OFFSET * 60};
-TimeChangeRule mySTD = {"MST", First,  Sun, Nov, 2,  ST_TIMEZONE_OFFSET * 60};
+TimeChangeRule mySTD = {"MST", Fourth,  Sun, Oct, 2,  ST_TIMEZONE_OFFSET * 60};
 Timezone myTZ(myDST, mySTD);
 
 void LogEvent(int Category, int ID, String Title, String Data){
@@ -72,6 +72,7 @@ void sunDataTimerCallback(void *pArg) {
 }
 
 bool loadSettings(config& data) {
+
   fs::File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
     Serial.println("Failed to open config file");
@@ -95,53 +96,118 @@ bool loadSettings(config& data) {
   configFile.readBytes(buf.get(), size);
   configFile.close();
 
+  StaticJsonDocument<JSON_SETTINGS_SIZE> doc;
+  DeserializationError error = deserializeJson(doc, buf.get());
 
-  StaticJsonBuffer<SENSORDATA_JSON_SIZE> jsonBuffer;
-  JsonObject& root = jsonBuffer.parseObject(buf.get());
-
-    if (!root.success()) {
+  if (error) {
     Serial.println("Failed to parse config file");
     LogEvent(EVENTCATEGORIES::System, 3, "FS failure", "Failed to parse config file.");
+    Serial.println(error.c_str());
     return false;
   }
 
   #ifdef __debugSettings
-  root.prettyPrintTo(Serial);
+  serializeJsonPretty(doc,Serial);
+  Serial.println();
   #endif
 
-  strcpy(appConfig.ssid, root["ssid"]);
-  strcpy(appConfig.password, root["password"]);
-  strcpy(appConfig.mqttServer, (const char*)root["mqttServer"]);
+  if (doc["ssid"]){
+    strcpy(appConfig.ssid, doc["ssid"]);
+  }
+  else
+  {
+    strcpy(appConfig.ssid, "ssid");
+  }
+  
+  if (doc["password"]){
+    strcpy(appConfig.password, doc["password"]);
+  }
+  else
+  {
+    strcpy(appConfig.password, DEFAULT_PASSWORD);
+  }
+  
+  if (doc["mqttServer"]){
+    strcpy(appConfig.mqttServer, doc["mqttServer"]);
+  }
+  else
+  {
+    strcpy(appConfig.mqttServer, DEFAULT_MQTT_SERVER);
+  }
+  
+  if (doc["mqttPort"]){
+    appConfig.mqttPort = doc["mqttPort"];
+  }
+  else
+  {
+    appConfig.mqttPort = DEFAULT_MQTT_PORT;
+  }
 
-  appConfig.mqttPort = root["mqttPort"];
+    if (doc["mqttTopic"]){
+    strcpy(appConfig.mqttTopic, doc["mqttTopic"]);
+  }
+  else
+  {
+    strcpy(appConfig.mqttTopic, DEFAULT_MQTT_TOPIC);
+  }
+  
+  if (doc["friendlyName"]){
+    strcpy(appConfig.friendlyName, doc["friendlyName"]);
+  }
+  else
+  {
+    strcpy(appConfig.friendlyName, NODE_DEFAULT_FRIENDLY_NAME);
+  }
+  
+  if (doc["timezone"]){
+    appConfig.timeZone = doc["timezone"];
+  }
+  else
+  {
+    appConfig.timeZone = 0;
+  }
+  
+  if (doc["heartbeatInterval"]){
+    appConfig.heartbeatInterval = doc["heartbeatInterval"];
+  }
+  else
+  {
+    appConfig.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
+  }
 
-  appConfig.timeZone = root["timezone"];
 
-  appConfig.staircaseLightDelay = root["staircaseLightDelay"];
-  appConfig.sunriseLightOffset = root["sunriseLightOffset"];
-  appConfig.sunsetLightOffset = root["sunsetLightOffset"];
+  appConfig.staircaseLightDelay = doc["staircaseLightDelay"];
+  appConfig.sunriseLightOffset = doc["sunriseLightOffset"];
+  appConfig.sunsetLightOffset = doc["sunsetLightOffset"];
 
   return true;
 }
 
 bool saveSettings() {
-  StaticJsonBuffer<SENSORDATA_JSON_SIZE> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
+  StaticJsonDocument<1024> doc;
 
-  root["ssid"] = appConfig.ssid;
-  root["password"] = appConfig.password;
+  doc["ssid"] = appConfig.ssid;
+  doc["password"] = appConfig.password;
 
-  root["timezone"] = appConfig.timeZone;
+  doc["heartbeatInterval"] = appConfig.heartbeatInterval;
 
-  root["mqttServer"] = appConfig.mqttServer;
-  root["mqttPort"] = appConfig.mqttPort;
+  doc["timezone"] = appConfig.timeZone;
 
-  root["staircaseLightDelay"] = appConfig.staircaseLightDelay;
-  root["sunriseLightOffset"] = appConfig.sunriseLightOffset;
-  root["sunsetLightOffset"] = appConfig.sunsetLightOffset;
+  doc["mqttServer"] = appConfig.mqttServer;
+  doc["mqttPort"] = appConfig.mqttPort;
+  doc["mqttTopic"] = appConfig.mqttTopic;
+
+  doc["friendlyName"] = appConfig.friendlyName;
+
+  doc["staircaseLightDelay"] = appConfig.staircaseLightDelay;
+  doc["sunriseLightOffset"] = appConfig.sunriseLightOffset;
+  doc["sunsetLightOffset"] = appConfig.sunsetLightOffset;
+
+
 
   #ifdef __debugSettings
-  root.prettyPrintTo(Serial);
+  serializeJsonPretty(doc,Serial);
+  Serial.println();
   #endif
 
   fs::File configFile = SPIFFS.open("/config.json", "w");
@@ -150,16 +216,13 @@ bool saveSettings() {
     LogEvent(System, 4, "FS failure", "Failed to open config file for writing.");
     return false;
   }
-
-  root.printTo(configFile);
+  serializeJson(doc, configFile);
   configFile.close();
 
-  Serial.println("Json size: " + String(SENSORDATA_JSON_SIZE));
   return true;
 }
 
 void defaultSettings(){
-
   #ifdef __debugSettings
   strcpy(appConfig.ssid, DEBUG_WIFI_SSID);
   strcpy(appConfig.password, DEBUG_WIFI_PASSWORD);
@@ -171,11 +234,14 @@ void defaultSettings(){
   #endif
 
   appConfig.mqttPort = 1883;
+  strcpy(appConfig.mqttTopic, DEFAULT_MQTT_TOPIC);
 
   appConfig.timeZone = 2;
 
-  appConfig.staircaseLightDelay = 60;
+  strcpy(appConfig.friendlyName, NODE_DEFAULT_FRIENDLY_NAME);
+  appConfig.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
 
+  appConfig.staircaseLightDelay = 60;
   appConfig.sunriseLightOffset = 0;
   appConfig.sunsetLightOffset = 0;
 
@@ -451,7 +517,7 @@ void handleRoot() {
   }
   f.close();
   server.send(200, "text/html", htmlString);
-  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page loaded", "/");
+  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page served", "/");
 }
 
 void handleStatus() {
@@ -470,7 +536,6 @@ void handleStatus() {
 
   TimeChangeRule *tcr;        // Pointer to the time change rule
   time_t localTime = myTZ.toLocal(now(), &tcr);
-  time_t currentTime = localTime;
 
   String s;
 
@@ -491,7 +556,7 @@ void handleStatus() {
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
     if (s.indexOf("%chipid%")>-1) s.replace("%chipid%", (String)ESP.getChipId());
     if (s.indexOf("%uptime%")>-1) s.replace("%uptime%", TimeIntervalToString(millis()/1000));
-    if (s.indexOf("%currenttime%")>-1) s.replace("%currenttime%", DateTimeToString(currentTime));
+    if (s.indexOf("%currenttime%")>-1) s.replace("%currenttime%", DateTimeToString(localTime));
     if (s.indexOf("%sunrise%")>-1) s.replace("%sunrise%",sr);
     if (s.indexOf("%sunset%")>-1) s.replace("%sunset%",ss);
     if (s.indexOf("%lastresetreason%")>-1) s.replace("%lastresetreason%", ESP.getResetReason());
@@ -499,6 +564,8 @@ void handleStatus() {
     if (s.indexOf("%flashchipspeed%")>-1) s.replace("%flashchipspeed%",String(ESP.getFlashChipSpeed()));
     if (s.indexOf("%freeheapsize%")>-1) s.replace("%freeheapsize%",String(ESP.getFreeHeap()));
     if (s.indexOf("%freesketchspace%")>-1) s.replace("%freesketchspace%",String(ESP.getFreeSketchSpace()));
+    if (s.indexOf("%friendlyname%")>-1) s.replace("%friendlyname%",appConfig.friendlyName);
+    if (s.indexOf("%mqtt-topic%")>-1) s.replace("%mqtt-topic%",appConfig.mqttTopic);
 
     //  Network settings
     switch (WiFi.getMode()) {
@@ -517,7 +584,9 @@ void handleStatus() {
         if (s.indexOf("%ssid%")>-1) s.replace("%ssid%",String(WiFi.SSID()));
         if (s.indexOf("%subnetmask%")>-1) s.replace("%subnetmask%",WiFi.subnetMask().toString());
         if (s.indexOf("%gateway%")>-1) s.replace("%gateway%",WiFi.gatewayIP().toString());
-
+        break;
+      default:
+        //  This should not happen...
         break;
     }
 
@@ -525,7 +594,7 @@ void handleStatus() {
     }
     f.close();
   server.send(200, "text/html", htmlString);
-  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page loaded", "status.html");
+  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page served", "status.html");
 }
 
 void handleStaircaseLightTimer() {
@@ -546,16 +615,19 @@ void handleStaircaseLightTimer() {
 
     if (PSclient.connected()){
 
-      StaticJsonBuffer<JSON_OBJECT_SIZE(1)> jsonBuffer;
-      JsonObject& root = jsonBuffer.createObject();
+      const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(6) + 180;
+      StaticJsonDocument<capacity> doc;
 
-      root["staircaseLightDelay"] = appConfig.staircaseLightDelay;
+      doc["staircaseLightDelay"] = appConfig.staircaseLightDelay;
 
-      root.prettyPrintTo(Serial);
+      #ifdef __debugSettings
+      serializeJsonPretty(doc,Serial);
       Serial.println();
+      #endif
 
       String myJsonString;
-      root.prettyPrintTo(myJsonString);
+
+      serializeJson(doc, myJsonString);
 
       PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + ESP.getChipId() + "/settings/", myJsonString ).set_qos(0));
     }
@@ -689,7 +761,6 @@ void handleGeneralSettings() {
 
   if (server.method() == HTTP_POST){  //  POST
     bool mqttDirty = false;
-
     if (server.hasArg("timezoneselector")){
       signed char oldTimeZone = appConfig.timeZone;
       appConfig.timeZone = atoi(server.arg("timezoneselector").c_str());
@@ -697,6 +768,18 @@ void handleGeneralSettings() {
       adjustTime((appConfig.timeZone - oldTimeZone) * SECS_PER_HOUR);
 
       LogEvent(EVENTCATEGORIES::TimeZoneChange, 1, "New time zone", "UTC " + server.arg("timezoneselector"));
+    }
+
+    if (server.hasArg("friendlyname")){
+      strcpy(appConfig.friendlyName, server.arg("friendlyname").c_str());
+      LogEvent(EVENTCATEGORIES::FriendlyNameChange, 1, "New friendly name", appConfig.friendlyName);
+    }
+
+    if (server.hasArg("heartbeatinterval")){
+      os_timer_disarm(&heartbeatTimer);
+      appConfig.heartbeatInterval = server.arg("heartbeatinterval").toInt();
+      LogEvent(EVENTCATEGORIES::HeartbeatIntervalChange, 1, "New Heartbeat interval", (String)appConfig.heartbeatInterval);
+      os_timer_arm(&heartbeatTimer, appConfig.heartbeatInterval * 1000, true);
     }
 
     //  MQTT settings
@@ -712,6 +795,13 @@ void handleGeneralSettings() {
         mqttDirty = true;
       appConfig.mqttPort = atoi(server.arg("mqttport").c_str());
       LogEvent(EVENTCATEGORIES::MqttParamChange, 2, "New MQTT port", server.arg("mqttport").c_str());
+    }
+
+    if (server.hasArg("mqtttopic")){
+      if ((String)appConfig.mqttTopic != server.arg("mqtttopic"))
+        mqttDirty = true;
+        sprintf(appConfig.mqttTopic, "%s", server.arg("mqtttopic").c_str());
+        LogEvent(EVENTCATEGORIES::MqttParamChange, 1, "New MQTT topic", appConfig.mqttTopic);
     }
 
     if (mqttDirty)
@@ -757,7 +847,10 @@ void handleGeneralSettings() {
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
     if (s.indexOf("%mqtt-servername%")>-1) s.replace("%mqtt-servername%", appConfig.mqttServer);
     if (s.indexOf("%mqtt-port%")>-1) s.replace("%mqtt-port%", String(appConfig.mqttPort));
+    if (s.indexOf("%mqtt-topic%")>-1) s.replace("%mqtt-topic%", appConfig.mqttTopic);
     if (s.indexOf("%timezoneslist%")>-1) s.replace("%timezoneslist%", timezoneslist);
+    if (s.indexOf("%friendlyname%")>-1) s.replace("%friendlyname%", appConfig.friendlyName);
+    if (s.indexOf("%heartbeatinterval%")>-1) s.replace("%heartbeatinterval%", (String)appConfig.heartbeatInterval);
 
     htmlString+=s;
   }
@@ -860,7 +953,7 @@ void handleTools() {
     f.close();
   server.send(200, "text/html", htmlString);
 
-  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page requested", "tools.html");
+  LogEvent(EVENTCATEGORIES::PageHandler, 2, "Page served", "tools.html");
 }
 
 /*
@@ -870,32 +963,6 @@ void handleTools() {
       Serial.println(server.arg(i));
     }
 */
-
-void handlePage() {
-
-  if (!is_authenticated()){
-     String header = "HTTP/1.1 301 OK\r\nLocation: /login.html\r\nCache-Control: no-cache\r\n\r\n";
-     server.sendContent(header);
-     return;
-   }
-
-   fs::File f = SPIFFS.open("/pageheader.html", "r");
-   String headerString;
-   if (f.available()) headerString = f.readString();
-   f.close();
-
-   f = SPIFFS.open("/page.html", "r");
-
-   String s, htmlString;
-
-   while (f.available()){
-     s = f.readStringUntil('\n');
-
-       htmlString+=s;
-   }
-   f.close();
-   server.send(200, "text/html", htmlString);
-}
 
 void handleNotFound(){
   String message = "File Not Found\n\n";
@@ -913,21 +980,36 @@ void handleNotFound(){
 }
 
 void SendHeartbeat(){
+
   if (PSclient.connected()){
 
-    StaticJsonBuffer<JSON_OBJECT_SIZE(2)> jsonBuffer;
-    JsonObject& root = jsonBuffer.createObject();
+    TimeChangeRule *tcr;        // Pointer to the time change rule
+    time_t localTime = myTZ.toLocal(now(), &tcr);
 
-    root["Node"] = ESP.getChipId();
-    root["Freeheap"] = ESP.getFreeHeap();
+    const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(6) + 180;
+    StaticJsonDocument<capacity> doc;
 
-    root.prettyPrintTo(Serial);
+    doc["Time"] = DateTimeToString(localTime);
+    doc["Node"] = ESP.getChipId();
+    doc["Freeheap"] = ESP.getFreeHeap();
+    doc["FriendlyName"] = appConfig.friendlyName;
+    doc["HeartbeatInterval"] = appConfig.heartbeatInterval;
+
+    JsonObject wifiDetails = doc.createNestedObject("Wifi");
+    wifiDetails["SSId"] = String(WiFi.SSID());
+    wifiDetails["MACAddress"] = String(WiFi.macAddress());
+    wifiDetails["IPAddress"] = WiFi.localIP().toString();
+
+    #ifdef __debugSettings
+    serializeJsonPretty(doc,Serial);
     Serial.println();
+    #endif
 
     String myJsonString;
-    root.prettyPrintTo(myJsonString);
 
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/espheartbeat/", myJsonString ).set_qos(0));
+    serializeJson(doc, myJsonString);
+
+    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/STATE", myJsonString ).set_qos(0));
   }
 
   needsHeartbeat = false;
@@ -1055,77 +1137,38 @@ void mqtt_callback(const MQTT::Publish& pub) {
   if (pub.payload_string()!=NULL)
     Serial.println(pub.payload_string());
 
-  StaticJsonBuffer<CONTROL_COMMAND_JSON_SIZE> jsonBuffer;
+  StaticJsonDocument<JSON_MQTT_COMMAND_SIZE> doc;
+  DeserializationError error = deserializeJson(doc, pub.payload_string());
 
-  char json[pub.payload_len()];
-  strcpy(json, pub.payload_string().c_str());
-
-  JsonObject& root = jsonBuffer.parseObject(json);
-
-  root.prettyPrintTo(Serial);
-  Serial.println();
-
-  //  Staircase lights
-  if (root.containsKey("StaircaseLightsOn")){
-    StartStaircaseLight();
-  }
-
-  if (root.containsKey("staircaseLightDelay")){
-    const char *aValue = root["staircaseLightDelay"];
-    appConfig.staircaseLightDelay = strtol(aValue, NULL, 0);
-    saveSettings();
-  }
-
-  if (root.containsKey("i2c_address")){
-    const char *i2c_aString = root["i2c_address"];
-    int i2cAddress = strtol(i2c_aString, NULL, 16);
-
-    if (root.containsKey("i2c_data")){
-      const char *i2c_dString = root["i2c_data"];
-      int i2cData = strtol(i2c_dString, NULL, 16);
-
-      Wire.beginTransmission(i2cAddress);
-      Wire.write(i2cData);
-      Wire.endTransmission();
-    }
-  }
-
-  //  reset
-  if (root.containsKey("reset")){
-    LogEvent(EVENTCATEGORIES::MqttMsg, 1, "Reset", "");
-    defaultSettings();
-    ESP.reset();
-  }
-
-    //  command
-  if (root.containsKey("command")){
-    const char *aCommand = root["command"];
-
-    if ((String)aCommand=="updateStatus"){
-      if (PSclient.connected()){
-        PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/Light1", (String)(stairlightLastState==true) ).set_qos(0));
-        PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/Light0", (String)(entranceLightState==true) ).set_qos(0));
-      }
-
-    }
-
-  }
-
-
-  //  restart
-  if (root.containsKey("restart")){
-    LogEvent(EVENTCATEGORIES::MqttMsg, 2, "Restart", "");
-    ESP.reset();
-  }
-
-  if (!root.success()) {
+  if (error) {
     Serial.println("Failed to parse incoming string.");
+    Serial.println(error.c_str());
     for (size_t i = 0; i < 10; i++) {
       digitalWrite(CONNECTION_STATUS_LED_GPIO, !digitalRead(CONNECTION_STATUS_LED_GPIO));
       delay(50);
     }
     return;
   }
+
+  #ifdef __debugSettings
+  serializeJsonPretty(doc,Serial);
+  Serial.println();
+  #endif
+
+
+  //  reset
+  if (doc.containsKey("reset")){
+    LogEvent(EVENTCATEGORIES::MqttMsg, 1, "Reset", "");
+    defaultSettings();
+    ESP.reset();
+  }
+
+  //  restart
+  if (doc.containsKey("restart")){
+    LogEvent(EVENTCATEGORIES::MqttMsg, 2, "Restart", "");
+    ESP.reset();
+  }
+
 }
 
 void setup() {
@@ -1144,7 +1187,7 @@ void setup() {
   Serial.println("Software version: " + FirmwareVersionString);
   Serial.println();
 
-  sprintf(defaultSSID,"ESP-%lu", ESP.getChipId());
+  sprintf(defaultSSID, "ESP-%u", ESP.getChipId());
   WiFi.hostname(defaultSSID);
 
   //  File system
@@ -1244,7 +1287,6 @@ void setup() {
   os_timer_setfn(&sunDataTimer, sunDataTimerCallback, NULL);
   os_timer_arm(&sunDataTimer, 60 * 60 * 1000, true);
 
-
   //  Randomizer
   srand(now());
 
@@ -1294,6 +1336,7 @@ void loop(){
           connectionState = STATE_WIFI_CONNECT;
         } else  {
           // Wifi is connected so check Internet
+          digitalWrite(CONNECTION_STATUS_LED_GPIO, LOW);
           connectionState = STATE_CHECK_INTERNET_CONNECTION;
 
           server.handleClient();
@@ -1379,7 +1422,7 @@ void loop(){
           msg += DateTimeToString(now());
           msg += "\"}";
 
-          if (PSclient.connect("ESP-" + String(ESP.getChipId()), MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/log", 0, false, msg )){
+          if (PSclient.connect("ESP-" + String(ESP.getChipId()), MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/log", 0, true, msg )){
             PSclient.set_callback(mqtt_callback);
             PSclient.subscribe(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/incoming", 0);
             LogEvent(EVENTCATEGORIES::Conn, 1, "Node online", WiFi.localIP().toString());
