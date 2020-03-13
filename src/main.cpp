@@ -1,4 +1,8 @@
 #define __debugSettings
+
+//#define _use_local_sun_data
+//#define _use_local_staircase_timer
+
 #include "includes.h"
 
 typedef enum {
@@ -17,7 +21,7 @@ os_timer_t heartbeatTimer;
 os_timer_t sunDataTimer;
 
 //  I2C
-PCF857x i2c_io(i2c_io_address, &Wire);
+PCF857x i2c_io(I2C_IO_ADDRESS, &Wire);
 
 //  Other global variables
 sunData_t sunData;
@@ -70,7 +74,6 @@ void sunDataTimerCallback(void *pArg) {
 }
 
 bool loadSettings(config& data) {
-
   fs::File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
     Serial.println("Failed to open config file");
@@ -173,10 +176,29 @@ bool loadSettings(config& data) {
     appConfig.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
   }
 
+  if (doc["staircaseLightDelay"]){
+    appConfig.staircaseLightDelay = doc["staircaseLightDelay"];
+  }
+  else
+  {
+    appConfig.staircaseLightDelay = DEFAULT_STAIRCASE_LIGHT_DELAY;
+  }
 
-  appConfig.staircaseLightDelay = doc["staircaseLightDelay"];
-  appConfig.sunriseLightOffset = doc["sunriseLightOffset"];
-  appConfig.sunsetLightOffset = doc["sunsetLightOffset"];
+  if (doc["staircaseLightDelay"]){
+    appConfig.sunriseLightOffset = doc["sunriseLightOffset"];
+  }
+  else
+  {
+    appConfig.sunriseLightOffset = DEFAULT_SUNRISE_LIGHT_OFFSET;
+  }
+
+  if (doc["staircaseLightDelay"]){
+    appConfig.sunsetLightOffset = doc["sunsetLightOffset"];
+  }
+  else
+  {
+    appConfig.sunsetLightOffset = DEFAULT_SUNSET_LIGHT_OFFSET;
+  }
 
   return true;
 }
@@ -200,8 +222,6 @@ bool saveSettings() {
   doc["staircaseLightDelay"] = appConfig.staircaseLightDelay;
   doc["sunriseLightOffset"] = appConfig.sunriseLightOffset;
   doc["sunsetLightOffset"] = appConfig.sunsetLightOffset;
-
-
 
   #ifdef __debugSettings
   serializeJsonPretty(doc,Serial);
@@ -239,9 +259,9 @@ void defaultSettings(){
   strcpy(appConfig.friendlyName, NODE_DEFAULT_FRIENDLY_NAME);
   appConfig.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
 
-  appConfig.staircaseLightDelay = 60;
-  appConfig.sunriseLightOffset = 0;
-  appConfig.sunsetLightOffset = 0;
+  appConfig.staircaseLightDelay = DEFAULT_STAIRCASE_LIGHT_DELAY;
+  appConfig.sunriseLightOffset = DEFAULT_SUNRISE_LIGHT_OFFSET;
+  appConfig.sunsetLightOffset = DEFAULT_SUNSET_LIGHT_OFFSET;
 
   if (!saveSettings()) {
     Serial.println("Failed to save config");
@@ -541,12 +561,6 @@ void handleStatus() {
 
   String htmlString, ds18b20list;
  
-  localTime = myTZ.toLocal(sunData.Sunrise, &tcr);;
-  String sr = DateTimeToString(localTime);
-
-  localTime = myTZ.toLocal(sunData.Sunset, &tcr);;
-  String ss = DateTimeToString(localTime);
-
   while (f.available()){
     s = f.readStringUntil('\n');
 
@@ -555,8 +569,6 @@ void handleStatus() {
     if (s.indexOf("%chipid%")>-1) s.replace("%chipid%", (String)ESP.getChipId());
     if (s.indexOf("%uptime%")>-1) s.replace("%uptime%", TimeIntervalToString(millis()/1000));
     if (s.indexOf("%currenttime%")>-1) s.replace("%currenttime%", DateTimeToString(localTime));
-    if (s.indexOf("%sunrise%")>-1) s.replace("%sunrise%",sr);
-    if (s.indexOf("%sunset%")>-1) s.replace("%sunset%",ss);
     if (s.indexOf("%lastresetreason%")>-1) s.replace("%lastresetreason%", ESP.getResetReason());
     if (s.indexOf("%flashchipsize%")>-1) s.replace("%flashchipsize%",String(ESP.getFlashChipSize()));
     if (s.indexOf("%flashchipspeed%")>-1) s.replace("%flashchipspeed%",String(ESP.getFlashChipSpeed()));
@@ -655,6 +667,7 @@ void handleStaircaseLightTimer() {
 
   while (f.available()){
     s = f.readStringUntil('\n');
+
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
     if (s.indexOf("%delaylist%")>-1) s.replace("%delaylist%", delaylist);
     htmlString+=s;
@@ -759,6 +772,7 @@ void handleGeneralSettings() {
 
   if (server.method() == HTTP_POST){  //  POST
     bool mqttDirty = false;
+
     if (server.hasArg("timezoneselector")){
       signed char oldTimeZone = appConfig.timeZone;
       appConfig.timeZone = atoi(server.arg("timezoneselector").c_str());
@@ -981,6 +995,7 @@ void handleNotFound(){
 
 void SendHeartbeat(){
 
+
   if (PSclient.connected()){
 
     TimeChangeRule *tcr;        // Pointer to the time change rule
@@ -1037,7 +1052,7 @@ void StartStaircaseLight(){
   LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
 
   if (PSclient.connected()){
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/Light1", "on" ).set_qos(0));
+    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/POWER1", "on" ).set_qos(0));
   }
 
 }
@@ -1111,23 +1126,6 @@ void ICACHE_RAM_ATTR PCFInterrupt() {
   PCFInterruptFlag = true;
 }
 
-/*
-Sample message expected:
-
-{dig0:1, dig1:0, dig2:1, dig3:0, pwm0:127}
-
-or
-
-{
-  "dig0": 1,
-  "dig1": 0,
-  "dig2": 1,
-  "dig3": 0,
-  "pwm0": 127
-}
-
-Order of parameters is ignored. Whitespaces/new line characters are ignored.
-*/
 void mqtt_callback(const MQTT::Publish& pub) {
 
   Serial.print("Topic:\t\t");
@@ -1169,6 +1167,61 @@ void mqtt_callback(const MQTT::Publish& pub) {
     ESP.reset();
   }
 
+  
+
+  String sCommand;
+  uint8_t iChannel;
+  
+  //  Relay0 - Entrance lights
+  if (doc.containsKey("POWER0")){
+    const char* myKey = doc["POWER0"];
+    sCommand = myKey;
+    sCommand.toUpperCase();
+    iChannel = 0;
+  }
+
+  //  Relay1 - Staircase lights
+  if (doc.containsKey("POWER1")){
+    const char* myKey = doc["POWER1"];
+    sCommand = myKey;
+    sCommand.toUpperCase();
+    iChannel = 1;
+  }
+
+  //  Relay2 - 
+  if (doc.containsKey("POWER2")){
+    const char* myKey = doc["POWER2"];
+    sCommand = myKey;
+    sCommand.toUpperCase();
+    iChannel = 2;
+}
+
+  //  Relay3 - 
+  if (doc.containsKey("POWER3")){
+    const char* myKey = doc["POWER3"];
+    sCommand = myKey;
+    sCommand.toUpperCase();
+    iChannel = 3;
+}
+
+  if ( sCommand == "ON" ){
+    i2c_io.write(iChannel, 0);
+    if (PSclient.connected()){
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, "on" ).set_qos(0));
+    }
+  }
+  else if ( sCommand == "OFF" ){
+    i2c_io.write(iChannel, 1);
+    if (PSclient.connected()){
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, "off" ).set_qos(0));
+    }
+  }
+  else if ( sCommand == "TOGGLE" ){
+    i2c_io.write(iChannel, !i2c_io.read(iChannel));
+    if (PSclient.connected()){
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, i2c_io.read(iChannel)?"off":"on" ).set_qos(0));
+    }
+  }
 }
 
 void setup() {
@@ -1203,24 +1256,20 @@ void setup() {
   WiFi.hostname(defaultSSID);
   
   //  GPIOs
-
   //  outputs
   pinMode(CONNECTION_STATUS_LED_GPIO, OUTPUT);
   digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
 
+  //  I2C
   Wire.begin(SDA_GPIO, SCL_GPIO);
   ScanI2C();
 
-  i2c_io.write8(0xff);
-  delay(100);
-
   #ifdef __debugSettings
 
-  Serial.println("Debugging");
-
   for (size_t i = 0; i < 5; i++) {
-    Serial.println(i);
     i2c_io.write8(0x00);
+    delay(100);
+    i2c_io.write8(0xff);
     delay(100);
   }
 
@@ -1269,6 +1318,7 @@ void setup() {
 
   server.onNotFound(handleNotFound);
 
+//  Web server
   if (MDNS.begin("esp8266")) {
     Serial.println("MDNS responder started.");
   }
@@ -1284,10 +1334,12 @@ void setup() {
 
   //  Timers
   os_timer_setfn(&heartbeatTimer, heartbeatTimerCallback, NULL);
-  os_timer_arm(&heartbeatTimer, HEARTBEAT_INTERVAL * 1000, true);
+  os_timer_arm(&heartbeatTimer, appConfig.heartbeatInterval * 1000, true);
 
+#ifdef _use_local_sun_data
   os_timer_setfn(&sunDataTimer, sunDataTimerCallback, NULL);
   os_timer_arm(&sunDataTimer, 60 * 60 * 1000, true);
+#endif
 
   //  Randomizer
   srand(now());
@@ -1301,6 +1353,8 @@ void loop(){
 
   if (isAccessPoint){
     if (!isAccessPointCreated){
+      Serial.print(" Could not connect to ");
+      Serial.print(appConfig.ssid);
       Serial.println("\r\nReverting to Access Point mode.");
 
       delay(500);
@@ -1428,6 +1482,7 @@ void loop(){
           PSclient.loop();
         }
 
+#ifdef _use_local_sun_data
         if (needsSunData){
           RefreshSunData();
           needsSunData = false;
@@ -1438,9 +1493,9 @@ void loop(){
           if (!entranceLightState){
             LogEvent(EVENTCATEGORIES::EntranceLight, 2, "Lights", "on");
             if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/Light0", "1" ).set_qos(0));
+              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/POWER0", "on" ).set_qos(0));
             }
-          i2c_io.write(ENTRANCELIGHT_RELAY, 0);
+          i2c_io.write(ENTRANCELIGHT_RELAY, 1);
           entranceLightState = true;
           }
         }
@@ -1448,23 +1503,26 @@ void loop(){
           if (entranceLightState){
             LogEvent(EVENTCATEGORIES::EntranceLight, 3, "Lights", "off");
             if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/Light0", "0" ).set_qos(0));
+              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/POWER0", "off" ).set_qos(0));
             }
           }
-          i2c_io.write(ENTRANCELIGHT_RELAY, 1);
+          i2c_io.write(ENTRANCELIGHT_RELAY, 0);
           entranceLightState = false;
         }
+#endif
 
+
+#ifdef _use_local_staircase_timer
         //  Staircase lights
         inputPattern = i2c_io.read8();
 
-        Serial.println(inputPattern);
+        //Serial.println(inputPattern, BIN);
 
-        // if ( (inputPattern & INPUT_MASK_1) == 0 ){
-        //   if (millis() - buttonPressedTime > BUTTON_DEBOUNCE_DELAY){
-        //     StartStaircaseLight();
-        //   }
-        // }
+        if ( (inputPattern & INPUT_MASK_1) == 0 ){
+          if (millis() - buttonPressedTime > BUTTON_DEBOUNCE_DELAY){
+            StartStaircaseLight();
+          }
+        }
 
         if ( millis() - buttonPressedTime < appConfig.staircaseLightDelay * 1000 ){
           i2c_io.write(STAIRCASELIGHT_RELAY, 0);
@@ -1474,18 +1532,19 @@ void loop(){
           i2c_io.write(STAIRCASELIGHT_RELAY, 1);
           if ( stairlightLastState ){
             LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
-
-            if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/Light1", "off" ).set_qos(0));
+          if (PSclient.connected()){
+              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/POWER1", "off" ).set_qos(0));
             }
           }
           stairlightLastState = false;
         }
+#endif
 
         if (needsHeartbeat){
           SendHeartbeat();
           needsHeartbeat = false;
         }
+
 
         // Set next connection state
         connectionState = STATE_CHECK_WIFI_CONNECTION;
