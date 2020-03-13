@@ -1,7 +1,7 @@
 #define __debugSettings
 
 //#define _use_local_sun_data
-//#define _use_local_staircase_timer
+#define _use_local_staircase_timer
 
 #include "includes.h"
 
@@ -42,6 +42,8 @@ bool needsSunData = false;
 bool entranceLightState = false;
 bool stairlightLastState = false;
 bool ntpInitialized = false;
+
+WiFiUDP Udp;
 
 // Daylight savings time rules for Greece
 TimeChangeRule myDST = {"MDT", Fourth, Sun, Mar, 2, DST_TIMEZONE_OFFSET * 60};
@@ -499,6 +501,7 @@ void handleLogin(){
   }
   f.close();
   server.send(200, "text/html", htmlString);
+  LogEvent(PageHandler, 2, "Page served", "/");
 }
 
 void handleRoot() {
@@ -1047,16 +1050,6 @@ void RefreshSunData(){
   LogEvent(EVENTCATEGORIES::RefreshSunsetSunrise, 1, "Sun data calculated", "Sunrise: " + sr + " - Sunset: " + ss);
 }
 
-void StartStaircaseLight(){
-  buttonPressedTime = millis();
-  LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
-
-  if (PSclient.connected()){
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/POWER1", "on" ).set_qos(0));
-  }
-
-}
-
 bool NeedsEntranceLight(){
 
   uint32_t mySunrise = (uint32_t)sunData.Sunrise;
@@ -1084,6 +1077,14 @@ bool NeedsEntranceLight(){
   }
 
   return true;
+}
+
+void StartStaircaseLight(){
+  buttonPressedTime = millis();
+  LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
+  if (PSclient.connected()){
+    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER1':'on'}" ).set_qos(0));
+  }
 }
 
 void ScanI2C(){
@@ -1205,21 +1206,23 @@ void mqtt_callback(const MQTT::Publish& pub) {
 }
 
   if ( sCommand == "ON" ){
+    if ( iChannel == 1)
+      StartStaircaseLight();
     i2c_io.write(iChannel, 0);
     if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, "on" ).set_qos(0));
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER" + (String)iChannel + "':'on'}" ).set_qos(0));
     }
   }
   else if ( sCommand == "OFF" ){
     i2c_io.write(iChannel, 1);
     if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, "off" ).set_qos(0));
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER" + (String)iChannel + "':'off'}" ).set_qos(0));
     }
   }
   else if ( sCommand == "TOGGLE" ){
     i2c_io.write(iChannel, !i2c_io.read(iChannel));
     if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/POWER" + iChannel, i2c_io.read(iChannel)?"off":"on" ).set_qos(0));
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", i2c_io.read(iChannel)?"{'POWER" + (String)iChannel + "':'off'}":"{'POWER" + (String)iChannel + "':'on'}" ).set_qos(0));
     }
   }
 }
@@ -1511,15 +1514,16 @@ void loop(){
         }
 #endif
 
+      inputPattern = i2c_io.read8();
+      //Serial.println(inputPattern, BIN);
 
 #ifdef _use_local_staircase_timer
         //  Staircase lights
-        inputPattern = i2c_io.read8();
-
-        //Serial.println(inputPattern, BIN);
 
         if ( (inputPattern & INPUT_MASK_1) == 0 ){
           if (millis() - buttonPressedTime > BUTTON_DEBOUNCE_DELAY){
+            i2c_io.write(1, 0);
+
             StartStaircaseLight();
           }
         }
@@ -1532,8 +1536,8 @@ void loop(){
           i2c_io.write(STAIRCASELIGHT_RELAY, 1);
           if ( stairlightLastState ){
             LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
-          if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/POWER1", "off" ).set_qos(0));
+            if (PSclient.connected()){
+              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER1':'off'}" ).set_qos(0));
             }
           }
           stairlightLastState = false;
