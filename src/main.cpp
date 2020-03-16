@@ -36,7 +36,6 @@ unsigned long buttonPressedTime = 4294967295 - 3600000;  //  a high number is ne
 enum CONNECTION_STATE connectionState;
 
 //  Flags
-volatile bool PCFInterruptFlag = false;
 bool needsHeartbeat = false;
 bool needsSunData = false;
 bool entranceLightState = false;
@@ -63,7 +62,7 @@ void LogEvent(int Category, int ID, String Title, String Data){
 
     Serial.println(msg);
 
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/log", msg ).set_qos(0));
+    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/log", msg ).set_qos(0));
   }
 }
 
@@ -253,7 +252,7 @@ void defaultSettings(){
   strcpy(appConfig.mqttServer, "test.mosquitto.org");
   #endif
 
-  appConfig.mqttPort = 1883;
+  appConfig.mqttPort = DEFAULT_MQTT_PORT;
   strcpy(appConfig.mqttTopic, DEFAULT_MQTT_TOPIC);
 
   appConfig.timeZone = 2;
@@ -578,7 +577,6 @@ void handleStatus() {
     if (s.indexOf("%freeheapsize%")>-1) s.replace("%freeheapsize%",String(ESP.getFreeHeap()));
     if (s.indexOf("%freesketchspace%")>-1) s.replace("%freesketchspace%",String(ESP.getFreeSketchSpace()));
     if (s.indexOf("%friendlyname%")>-1) s.replace("%friendlyname%",appConfig.friendlyName);
-    if (s.indexOf("%mqtt-topic%")>-1) s.replace("%mqtt-topic%",appConfig.mqttTopic);
 
     //  Network settings
     switch (WiFi.getMode()) {
@@ -690,7 +688,7 @@ void handleEntranceLight() {
    }
 
   if (server.method() == HTTP_POST){  //  POST
-    for (size_t i = 0; i < server.args(); i++) {
+    for (int i = 0; i < server.args(); i++) {
       Serial.print(server.argName(i));
       Serial.print(": ");
       Serial.println(server.arg(i));
@@ -997,9 +995,7 @@ void handleNotFound(){
 }
 
 void SendHeartbeat(){
-
-
-  if (PSclient.connected()){
+    if (PSclient.connected()){
 
     TimeChangeRule *tcr;        // Pointer to the time change rule
     time_t localTime = myTZ.toLocal(now(), &tcr);
@@ -1123,10 +1119,6 @@ void ScanI2C(){
 
 }
 
-void ICACHE_RAM_ATTR PCFInterrupt() {
-  PCFInterruptFlag = true;
-}
-
 void mqtt_callback(const MQTT::Publish& pub) {
 
   Serial.print("Topic:\t\t");
@@ -1195,7 +1187,7 @@ void mqtt_callback(const MQTT::Publish& pub) {
     sCommand = myKey;
     sCommand.toUpperCase();
     iChannel = 2;
-}
+  }
 
   //  Relay3 - 
   if (doc.containsKey("POWER3")){
@@ -1203,7 +1195,7 @@ void mqtt_callback(const MQTT::Publish& pub) {
     sCommand = myKey;
     sCommand.toUpperCase();
     iChannel = 3;
-}
+  }
 
   if ( sCommand == "ON" ){
     if ( iChannel == 1)
@@ -1259,6 +1251,7 @@ void setup() {
   WiFi.hostname(defaultSSID);
   
   //  GPIOs
+
   //  outputs
   pinMode(CONNECTION_STATUS_LED_GPIO, OUTPUT);
   digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
@@ -1321,7 +1314,7 @@ void setup() {
 
   server.onNotFound(handleNotFound);
 
-//  Web server
+  //  Web server
   if (MDNS.begin("esp8266")) {
     Serial.println("MDNS responder started.");
   }
@@ -1339,10 +1332,10 @@ void setup() {
   os_timer_setfn(&heartbeatTimer, heartbeatTimerCallback, NULL);
   os_timer_arm(&heartbeatTimer, appConfig.heartbeatInterval * 1000, true);
 
-#ifdef _use_local_sun_data
+  #ifdef _use_local_sun_data
   os_timer_setfn(&sunDataTimer, sunDataTimerCallback, NULL);
   os_timer_arm(&sunDataTimer, 60 * 60 * 1000, true);
-#endif
+  #endif
 
   //  Randomizer
   srand(now());
@@ -1485,6 +1478,7 @@ void loop(){
           PSclient.loop();
         }
 
+
 #ifdef _use_local_sun_data
         if (needsSunData){
           RefreshSunData();
@@ -1514,16 +1508,14 @@ void loop(){
         }
 #endif
 
-      inputPattern = i2c_io.read8();
-      //Serial.println(inputPattern, BIN);
+        inputPattern = i2c_io.read8();
+        //Serial.println(inputPattern, BIN);
 
-#ifdef _use_local_staircase_timer
         //  Staircase lights
 
         if ( (inputPattern & INPUT_MASK_1) == 0 ){
           if (millis() - buttonPressedTime > BUTTON_DEBOUNCE_DELAY){
             i2c_io.write(1, 0);
-
             StartStaircaseLight();
           }
         }
@@ -1542,18 +1534,16 @@ void loop(){
           }
           stairlightLastState = false;
         }
-#endif
 
         if (needsHeartbeat){
           SendHeartbeat();
           needsHeartbeat = false;
         }
 
-
         // Set next connection state
         connectionState = STATE_CHECK_WIFI_CONNECTION;
         break;
-    }
+      }
 
   }
 }
