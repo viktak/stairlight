@@ -1079,7 +1079,7 @@ void StartStaircaseLight(){
   buttonPressedTime = millis();
   LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
   if (PSclient.connected()){
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER1':'on'}" ).set_qos(0));
+    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1", "on" ).set_qos(0));
   }
 }
 
@@ -1202,19 +1202,13 @@ void mqtt_callback(const MQTT::Publish& pub) {
       StartStaircaseLight();
     i2c_io.write(iChannel, 0);
     if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER" + (String)iChannel + "':'on'}" ).set_qos(0));
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel, "on" ).set_qos(0));
     }
   }
   else if ( sCommand == "OFF" ){
     i2c_io.write(iChannel, 1);
     if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER" + (String)iChannel + "':'off'}" ).set_qos(0));
-    }
-  }
-  else if ( sCommand == "TOGGLE" ){
-    i2c_io.write(iChannel, !i2c_io.read(iChannel));
-    if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", i2c_io.read(iChannel)?"{'POWER" + (String)iChannel + "':'off'}":"{'POWER" + (String)iChannel + "':'on'}" ).set_qos(0));
+      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel, "off" ).set_qos(0));
     }
   }
 }
@@ -1529,7 +1523,7 @@ void loop(){
           if ( stairlightLastState ){
             LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
             if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT", "{'POWER1':'off'}" ).set_qos(0));
+              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1", "off" ).set_qos(0));
             }
           }
           stairlightLastState = false;
