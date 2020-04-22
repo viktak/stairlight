@@ -15,7 +15,6 @@
 #include <ArduinoOTA.h>
 #include <ESP8266WebServer.h>
 
-#include <Wire.h>
 #include <pcf8574_esp.h>
 
 #define FS_NO_GLOBALS   //  This is needed for FS.h and SD.h together
