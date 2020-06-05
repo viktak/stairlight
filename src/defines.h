@@ -4,7 +4,7 @@
 #define HARDWARE_ID "NeoPixel & I2C"
 #define HARDWARE_VERSION "1.0"
 #define SOFTWARE_ID "Stairlight Express"
-#define FIRMWARE_VERSION "1.2"
+#define FIRMWARE_VERSION "1.3"
 
 #define JSON_SETTINGS_SIZE (JSON_OBJECT_SIZE(11) + 270)
 #define JSON_MQTT_COMMAND_SIZE 300

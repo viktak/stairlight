@@ -19,6 +19,7 @@ PubSubClient PSclient(wclient);
 //  Timers and their flags
 os_timer_t heartbeatTimer;
 os_timer_t sunDataTimer;
+os_timer_t accessPointTimer;
 
 //  I2C
 PCF857x i2c_io(I2C_IO_ADDRESS, &Wire);
@@ -28,7 +29,7 @@ sunData_t sunData;
 config appConfig;
 bool isAccessPoint = false;
 bool isAccessPointCreated = false;
-
+TimeChangeRule *tcr;        // Pointer to the time change rule
 
 unsigned long inputPattern;
 unsigned long buttonPressedTime = 4294967295 - 3600000;  //  a high number is needed to prevent millis() overflow problem
@@ -63,6 +64,10 @@ void LogEvent(int Category, int ID, String Title, String Data){
 
     PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/log", msg ).set_qos(0));
   }
+}
+
+void accessPointTimerCallback(void *pArg) {
+  ESP.reset();
 }
 
 void heartbeatTimerCallback(void *pArg) {
@@ -117,7 +122,7 @@ bool loadSettings(config& data) {
   }
   else
   {
-    strcpy(appConfig.ssid, "ssid");
+    strcpy(appConfig.ssid, defaultSSID);
   }
   
   if (doc["password"]){
@@ -485,6 +490,8 @@ void handleLogin(){
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
+
   f = LittleFS.open("/login.html", "r");
 
   String s, htmlString;
@@ -493,6 +500,7 @@ void handleLogin(){
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%alert%")>-1) s.replace("%alert%", msg);
 
     htmlString+=s;
@@ -516,6 +524,8 @@ void handleRoot() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
+
   f = LittleFS.open("/index.html", "r");
 
   String FirmwareVersionString = String(FIRMWARE_VERSION) + " @ " + String(__TIME__) + " - " + String(__DATE__);
@@ -526,6 +536,7 @@ void handleRoot() {
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%espid%")>-1) s.replace("%espid%", (String)ESP.getChipId());
     if (s.indexOf("%hardwareid%")>-1) s.replace("%hardwareid%", HARDWARE_ID);
     if (s.indexOf("%hardwareversion%")>-1) s.replace("%hardwareversion%", HARDWARE_VERSION);
@@ -553,7 +564,6 @@ void handleStatus() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  TimeChangeRule *tcr;        // Pointer to the time change rule
   time_t localTime = myTZ.toLocal(now(), &tcr);
 
   String s;
@@ -567,6 +577,7 @@ void handleStatus() {
 
     //  System information
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%chipid%")>-1) s.replace("%chipid%", (String)ESP.getChipId());
     if (s.indexOf("%uptime%")>-1) s.replace("%uptime%", TimeIntervalToString(millis()/1000));
     if (s.indexOf("%currenttime%")>-1) s.replace("%currenttime%", DateTimeToString(localTime));
@@ -648,6 +659,7 @@ void handleStaircaseLightTimer() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
 
   f = LittleFS.open("/staircaselighttimer.html", "r");
 
@@ -669,6 +681,7 @@ void handleStaircaseLightTimer() {
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%delaylist%")>-1) s.replace("%delaylist%", delaylist);
     htmlString+=s;
   }
@@ -708,6 +721,7 @@ void handleEntranceLight() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
 
   f = LittleFS.open("/entrancelight.html", "r");
 
@@ -751,7 +765,9 @@ void handleEntranceLight() {
 
   while (f.available()){
     s = f.readStringUntil('\n');
+
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%sunsetoffsetlist%")>-1) s.replace("%sunsetoffsetlist%", sunsetoffsetlist);
     if (s.indexOf("%sunriseoffsetlist%")>-1) s.replace("%sunriseoffsetlist%", sunriseoffsetlist);
     htmlString+=s;
@@ -829,6 +845,8 @@ void handleGeneralSettings() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
+
   f = LittleFS.open("/generalsettings.html", "r");
 
   String s, htmlString, timezoneslist;
@@ -859,6 +877,7 @@ void handleGeneralSettings() {
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%mqtt-servername%")>-1) s.replace("%mqtt-servername%", appConfig.mqttServer);
     if (s.indexOf("%mqtt-port%")>-1) s.replace("%mqtt-port%", String(appConfig.mqttPort));
     if (s.indexOf("%mqtt-topic%")>-1) s.replace("%mqtt-topic%", appConfig.mqttTopic);
@@ -901,6 +920,8 @@ void handleNetworkSettings() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
+
   f = LittleFS.open("/networksettings.html", "r");
   String s, htmlString, wifiList;
 
@@ -916,6 +937,7 @@ void handleNetworkSettings() {
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%wifilist%")>-1) s.replace("%wifilist%", wifiList);
       htmlString+=s;
     }
@@ -953,6 +975,8 @@ void handleTools() {
   if (f.available()) headerString = f.readString();
   f.close();
 
+  time_t localTime = myTZ.toLocal(now(), &tcr);
+
   f = LittleFS.open("/tools.html", "r");
 
   String s, htmlString;
@@ -961,6 +985,7 @@ void handleTools() {
     s = f.readStringUntil('\n');
 
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
+    if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
 
       htmlString+=s;
     }
@@ -994,9 +1019,9 @@ void handleNotFound(){
 }
 
 void SendHeartbeat(){
+
     if (PSclient.connected()){
 
-    TimeChangeRule *tcr;        // Pointer to the time change rule
     time_t localTime = myTZ.toLocal(now(), &tcr);
 
     const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(6) + 180;
@@ -1030,7 +1055,6 @@ void SendHeartbeat(){
 
 void RefreshSunData(){
 
-  TimeChangeRule *tcr;        // Pointer to the time change rule
   time_t localTime = myTZ.toLocal(now(), &tcr);
 
   sunData.Sunrise = CalculateSunData(localTime, LATITUDE, LONGITUDE, Sunrise);
@@ -1365,6 +1389,14 @@ void loop(){
 
       Serial.print("Access point address:\t");
       Serial.println(myIP);
+
+      Serial.println();
+      Serial.println("Note: The device will reset in 5 minutes.");
+
+
+      os_timer_setfn(&accessPointTimer, accessPointTimerCallback, NULL);
+      os_timer_arm(&accessPointTimer, ACCESS_POINT_TIMEOUT, true);
+      os_timer_disarm(&heartbeatTimer);
     }
     server.handleClient();
   }
