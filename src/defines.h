@@ -1,3 +1,6 @@
+#ifndef DEFINES_H
+#define DEFINES_H
+
 #define MQTT_CUSTOMER "viktak"
 #define MQTT_PROJECT  "spiti"
 
@@ -32,3 +35,5 @@
 #define DEFAULT_STAIRCASE_LIGHT_DELAY 60
 #define DEFAULT_SUNRISE_LIGHT_OFFSET 0
 #define DEFAULT_SUNSET_LIGHT_OFFSET 0
+
+#endif
