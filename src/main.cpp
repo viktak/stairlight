@@ -62,8 +62,25 @@ void LogEvent(int Category, int ID, String Title, String Data){
 
     Serial.println(msg);
 
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/log", msg ).set_qos(0));
+    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/log").c_str(), msg.c_str(), false);
   }
+}
+
+void SetRandomSeed(){
+    uint32_t seed;
+
+    // random works best with a seed that can use 31 bits
+    // analogRead on a unconnected pin tends toward less than four bits
+    seed = analogRead(0);
+    delay(1);
+
+    for (int shifts = 3; shifts < 31; shifts += 3)
+    {
+        seed ^= analogRead(0) << shifts;
+        delay(1);
+    }
+
+    randomSeed(seed);
 }
 
 void accessPointTimerCallback(void *pArg) {
@@ -587,6 +604,7 @@ void handleStatus() {
     if (s.indexOf("%freeheapsize%")>-1) s.replace("%freeheapsize%",String(ESP.getFreeHeap()));
     if (s.indexOf("%freesketchspace%")>-1) s.replace("%freesketchspace%",String(ESP.getFreeSketchSpace()));
     if (s.indexOf("%friendlyname%")>-1) s.replace("%friendlyname%",appConfig.friendlyName);
+    if (s.indexOf("%mqtt-topic%")>-1) s.replace("%mqtt-topic%",appConfig.mqttTopic);
 
     //  Network settings
     switch (WiFi.getMode()) {
@@ -650,7 +668,7 @@ void handleStaircaseLightTimer() {
 
       serializeJson(doc, myJsonString);
 
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + ESP.getChipId() + "/settings/", myJsonString ).set_qos(0));
+      PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + ESP.getChipId() + "/settings/").c_str(), myJsonString.c_str(), 0 );
     }
   }
 
@@ -912,11 +930,14 @@ void handleNetworkSettings() {
       connectionState = STATE_CHECK_WIFI_CONNECTION;
       WiFi.disconnect(false);
 
+      ESP.reset();
     }
   }
 
   File f = LittleFS.open("/pageheader.html", "r");
+
   String headerString;
+
   if (f.available()) headerString = f.readString();
   f.close();
 
@@ -1047,7 +1068,7 @@ void SendHeartbeat(){
 
     serializeJson(doc, myJsonString);
 
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/HEARTBEAT", myJsonString ).set_qos(0));
+    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/HEARTBEAT").c_str(), myJsonString.c_str(), 0);
   }
 
   needsHeartbeat = false;
@@ -1102,7 +1123,7 @@ void StartStaircaseLight(){
   buttonPressedTime = millis();
   LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
   if (PSclient.connected()){
-    PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1", "on" ).set_qos(0));
+    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "on", 0 );
   }
 }
 
@@ -1142,17 +1163,19 @@ void ScanI2C(){
 
 }
 
-void mqtt_callback(const MQTT::Publish& pub) {
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
   Serial.print("Topic:\t\t");
-  Serial.println(pub.topic());
+  Serial.println(topic);
 
   Serial.print("Payload:\t");
-  if (pub.payload_string()!=NULL)
-    Serial.println(pub.payload_string());
+  for (unsigned int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
 
   StaticJsonDocument<JSON_MQTT_COMMAND_SIZE> doc;
-  DeserializationError error = deserializeJson(doc, pub.payload_string());
+  DeserializationError error = deserializeJson(doc, payload);
 
   if (error) {
     Serial.println("Failed to parse incoming string.");
@@ -1163,78 +1186,81 @@ void mqtt_callback(const MQTT::Publish& pub) {
     }
     return;
   }
+  else{
+    //  It IS a JSON string
 
-  #ifdef __debugSettings
-  serializeJsonPretty(doc,Serial);
-  Serial.println();
-  #endif
+    #ifdef __debugSettings
+    serializeJsonPretty(doc,Serial);
+    Serial.println();
+    #endif
 
 
-  //  reset
-  if (doc.containsKey("reset")){
-    LogEvent(EVENTCATEGORIES::MqttMsg, 1, "Reset", "");
-    defaultSettings();
-    ESP.reset();
-  }
+    String sCommand;
+    uint8_t iChannel;
+    
+    //  Relay0 - Entrance lights
+    if (doc.containsKey("POWER0")){
+      const char* myKey = doc["POWER0"];
+      sCommand = myKey;
+      sCommand.toUpperCase();
+      iChannel = 0;
+    }
 
-  //  restart
-  if (doc.containsKey("restart")){
-    LogEvent(EVENTCATEGORIES::MqttMsg, 2, "Restart", "");
-    ESP.reset();
-  }
+    //  Relay1 - Staircase lights
+    if (doc.containsKey("POWER1")){
+      const char* myKey = doc["POWER1"];
+      sCommand = myKey;
+      sCommand.toUpperCase();
+      iChannel = 1;
+    }
 
-  
+    //  Relay2 - 
+    if (doc.containsKey("POWER2")){
+      const char* myKey = doc["POWER2"];
+      sCommand = myKey;
+      sCommand.toUpperCase();
+      iChannel = 2;
+    }
 
-  String sCommand;
-  uint8_t iChannel;
-  
-  //  Relay0 - Entrance lights
-  if (doc.containsKey("POWER0")){
-    const char* myKey = doc["POWER0"];
-    sCommand = myKey;
-    sCommand.toUpperCase();
-    iChannel = 0;
-  }
+    //  Relay3 - 
+    if (doc.containsKey("POWER3")){
+      const char* myKey = doc["POWER3"];
+      sCommand = myKey;
+      sCommand.toUpperCase();
+      iChannel = 3;
+    }
 
-  //  Relay1 - Staircase lights
-  if (doc.containsKey("POWER1")){
-    const char* myKey = doc["POWER1"];
-    sCommand = myKey;
-    sCommand.toUpperCase();
-    iChannel = 1;
-  }
+    if ( sCommand == "ON" ){
+      if ( iChannel == 1)
+        StartStaircaseLight();
+      i2c_io.write(iChannel, 0);
+      if (PSclient.connected()){
+        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", 0 );
+      }
+    }
+    else if ( sCommand == "OFF" ){
+      i2c_io.write(iChannel, 1);
+      if (PSclient.connected()){
+        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", 0 );
+      }
+    }
 
-  //  Relay2 - 
-  if (doc.containsKey("POWER2")){
-    const char* myKey = doc["POWER2"];
-    sCommand = myKey;
-    sCommand.toUpperCase();
-    iChannel = 2;
-  }
+    //  reset
+    if (doc.containsKey("reset")){
+      LogEvent(EVENTCATEGORIES::MqttMsg, 1, "Reset", "");
+      defaultSettings();
+      ESP.reset();
+    }
 
-  //  Relay3 - 
-  if (doc.containsKey("POWER3")){
-    const char* myKey = doc["POWER3"];
-    sCommand = myKey;
-    sCommand.toUpperCase();
-    iChannel = 3;
-  }
-
-  if ( sCommand == "ON" ){
-    if ( iChannel == 1)
-      StartStaircaseLight();
-    i2c_io.write(iChannel, 0);
-    if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel, "on" ).set_qos(0));
+    //  restart
+    if (doc.containsKey("restart")){
+      LogEvent(EVENTCATEGORIES::MqttMsg, 2, "Restart", "");
+      ESP.reset();
     }
   }
-  else if ( sCommand == "OFF" ){
-    i2c_io.write(iChannel, 1);
-    if (PSclient.connected()){
-      PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel, "off" ).set_qos(0));
-    }
-  }
+
 }
+  
 
 void setup() {
   delay(1); //  Needed for PlatformIO serial monitor
@@ -1355,7 +1381,7 @@ void setup() {
   #endif
 
   //  Randomizer
-  srand(now());
+  SetRandomSeed();
 
   // Set the initial connection state
   connectionState = STATE_CHECK_WIFI_CONNECTION;
@@ -1366,7 +1392,7 @@ void loop(){
 
   if (isAccessPoint){
     if (!isAccessPointCreated){
-      Serial.print(" Could not connect to ");
+      Serial.print("Could not connect to ");
       Serial.print(appConfig.ssid);
       Serial.println("\r\nReverting to Access Point mode.");
 
@@ -1436,7 +1462,7 @@ void loop(){
           WiFi.begin(appConfig.ssid, appConfig.password);
 
           // Initialize iteration counter
-          char attempt = 0;
+          uint8_t attempt = 0;
 
           while ((WiFi.status() != WL_CONNECTED) && (attempt++ < WIFI_CONNECTION_TIMEOUT)) {
             digitalWrite(CONNECTION_STATUS_LED_GPIO, LOW);
@@ -1468,7 +1494,7 @@ void loop(){
         if (checkInternetConnection()) {
           // We have an Internet connection
 
-          if (! ntpInitialized) {
+          if (!ntpInitialized) {
             // We are connected to the Internet for the first time so set NTP provider
             initNTP();
 
@@ -1488,19 +1514,18 @@ void loop(){
         ArduinoOTA.handle();
 
         if (!PSclient.connected()) {
-          PSclient.set_server(appConfig.mqttServer, appConfig.mqttPort);
+          PSclient.setServer(appConfig.mqttServer, appConfig.mqttPort);
+            String clientId = "ESP8266Client-";
+            clientId += String(random(0xffff), HEX);
 
-          if (PSclient.connect("ESP-" + String(ESP.getChipId()), MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE", 0, true, "offline" )){
-            PSclient.set_callback(mqtt_callback);
-            PSclient.subscribe(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/cmnd", 0);
+          if (PSclient.connect(clientId.c_str(), (MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), 0, true, "offline" )){
+            PSclient.setCallback(mqtt_callback);
 
-            PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE", "online" ).set_qos(0).set_retain(true));
+            PSclient.subscribe((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/cmnd").c_str(), 0);
+
+            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), "online", false);
             LogEvent(EVENTCATEGORIES::Conn, 1, "Node online", WiFi.localIP().toString());
           }
-        }
-
-        if (PSclient.connected()){
-          PSclient.loop();
         }
 
 
@@ -1554,10 +1579,14 @@ void loop(){
           if ( stairlightLastState ){
             LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
             if (PSclient.connected()){
-              PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1", "off" ).set_qos(0));
+              PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", 0 );
             }
           }
           stairlightLastState = false;
+        }
+
+        if (PSclient.connected()){
+          PSclient.loop();
         }
 
         if (needsHeartbeat){
