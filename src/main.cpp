@@ -171,7 +171,7 @@ bool loadSettings(config& data) {
   }
   else
   {
-    strcpy(appConfig.mqttTopic, DEFAULT_MQTT_TOPIC);
+    strcpy(appConfig.mqttTopic, defaultSSID);
   }
   
   if (doc["friendlyName"]){
@@ -274,7 +274,7 @@ void defaultSettings(){
   #endif
 
   appConfig.mqttPort = DEFAULT_MQTT_PORT;
-  strcpy(appConfig.mqttTopic, DEFAULT_MQTT_TOPIC);
+  strcpy(appConfig.mqttTopic, defaultSSID);
 
   appConfig.timeZone = 2;
 
@@ -668,7 +668,7 @@ void handleStaircaseLightTimer() {
 
       serializeJson(doc, myJsonString);
 
-      PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + ESP.getChipId() + "/settings/").c_str(), myJsonString.c_str(), 0 );
+      PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + ESP.getChipId() + "/settings/").c_str(), myJsonString.c_str(), false );
     }
   }
 
@@ -1068,7 +1068,7 @@ void SendHeartbeat(){
 
     serializeJson(doc, myJsonString);
 
-    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/HEARTBEAT").c_str(), myJsonString.c_str(), 0);
+    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + "/" + appConfig.mqttTopic + "/HEARTBEAT").c_str(), myJsonString.c_str(), false);
   }
 
   needsHeartbeat = false;
@@ -1123,7 +1123,7 @@ void StartStaircaseLight(){
   buttonPressedTime = millis();
   LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
   if (PSclient.connected()){
-    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "on", 0 );
+    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "on", false );
   }
 }
 
@@ -1235,13 +1235,13 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
         StartStaircaseLight();
       i2c_io.write(iChannel, 0);
       if (PSclient.connected()){
-        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", 0 );
+        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
       }
     }
     else if ( sCommand == "OFF" ){
       i2c_io.write(iChannel, 1);
       if (PSclient.connected()){
-        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", 0 );
+        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", false );
       }
     }
 
@@ -1515,10 +1515,7 @@ void loop(){
 
         if (!PSclient.connected()) {
           PSclient.setServer(appConfig.mqttServer, appConfig.mqttPort);
-            String clientId = "ESP8266Client-";
-            clientId += String(random(0xffff), HEX);
-
-          if (PSclient.connect(clientId.c_str(), (MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), 0, true, "offline" )){
+          if (PSclient.connect(defaultSSID, (MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), 0, true, "offline" )){
             PSclient.setCallback(mqtt_callback);
 
             PSclient.subscribe((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/cmnd").c_str(), 0);
@@ -1579,7 +1576,7 @@ void loop(){
           if ( stairlightLastState ){
             LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
             if (PSclient.connected()){
-              PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", 0 );
+              PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", false );
             }
           }
           stairlightLastState = false;
