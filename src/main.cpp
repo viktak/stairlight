@@ -171,6 +171,7 @@ bool loadSettings(config& data) {
   }
   else
   {
+    sprintf(defaultSSID, "%s-%u", DEFAULT_MQTT_TOPIC, ESP.getChipId());
     strcpy(appConfig.mqttTopic, defaultSSID);
   }
   
@@ -274,6 +275,8 @@ void defaultSettings(){
   #endif
 
   appConfig.mqttPort = DEFAULT_MQTT_PORT;
+
+  sprintf(defaultSSID, "%s-%u", DEFAULT_MQTT_TOPIC, ESP.getChipId());
   strcpy(appConfig.mqttTopic, defaultSSID);
 
   appConfig.timeZone = 2;
@@ -1290,7 +1293,6 @@ void setup() {
     Serial.println("Config loaded.");
   }
 
-  sprintf(defaultSSID, "%s-%u", appConfig.mqttTopic, ESP.getChipId());
   WiFi.hostname(defaultSSID);
   
   //  GPIOs
