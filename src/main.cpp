@@ -44,11 +44,6 @@ bool ntpInitialized = false;
 
 WiFiUDP Udp;
 
-// Daylight savings time rules for Greece
-TimeChangeRule myDST = {"MDT", Fourth, Sun, Mar, 2, DST_TIMEZONE_OFFSET * 60};
-TimeChangeRule mySTD = {"MST", Fourth,  Sun, Oct, 2,  ST_TIMEZONE_OFFSET * 60};
-Timezone myTZ(myDST, mySTD);
-
 void LogEvent(int Category, int ID, String Title, String Data){
   if (PSclient.connected()){
 
@@ -460,7 +455,7 @@ time_t CalculateSunData(time_t time, double_t latitude, double_t longitude, sunR
 
   time_t lastMidnight = now() - 3600 * hour(time) - 60 * minute(time) - second(time);
 
-  if ( myTZ.locIsDST(time) ){
+  if (timezones[appConfig.timeZone]->locIsDST(time)){
     return lastMidnight + 3600 * (hours + 1) + 60 * minutes + seconds;
   } else{
     return lastMidnight + 3600 * hours + 60 * minutes + seconds;
@@ -510,7 +505,7 @@ void handleLogin(){
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/login.html", "r");
 
@@ -544,7 +539,7 @@ void handleRoot() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/index.html", "r");
 
@@ -584,12 +579,13 @@ void handleStatus() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   String s;
 
   f = LittleFS.open("/status.html", "r");
 
+  String FirmwareVersionString = String(FIRMWARE_VERSION);
   String htmlString, ds18b20list;
  
   while (f.available()){
@@ -599,6 +595,10 @@ void handleStatus() {
     if (s.indexOf("%pageheader%")>-1) s.replace("%pageheader%", headerString);
     if (s.indexOf("%year%")>-1) s.replace("%year%", (String)year(localTime));
     if (s.indexOf("%chipid%")>-1) s.replace("%chipid%", (String)ESP.getChipId());
+    if (s.indexOf("%hardwareid%")>-1) s.replace("%hardwareid%", HARDWARE_ID);
+    if (s.indexOf("%hardwareversion%")>-1) s.replace("%hardwareversion%", HARDWARE_VERSION);
+    if (s.indexOf("%firmwareid%")>-1) s.replace("%firmwareid%", SOFTWARE_ID);
+    if (s.indexOf("%firmwareversion%")>-1) s.replace("%firmwareversion%", FirmwareVersionString);
     if (s.indexOf("%uptime%")>-1) s.replace("%uptime%", TimeIntervalToString(millis()/1000));
     if (s.indexOf("%currenttime%")>-1) s.replace("%currenttime%", DateTimeToString(localTime));
     if (s.indexOf("%lastresetreason%")>-1) s.replace("%lastresetreason%", ESP.getResetReason());
@@ -680,7 +680,7 @@ void handleStaircaseLightTimer() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/staircaselighttimer.html", "r");
 
@@ -742,7 +742,7 @@ void handleEntranceLight() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/entrancelight.html", "r");
 
@@ -866,7 +866,7 @@ void handleGeneralSettings() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/generalsettings.html", "r");
 
@@ -874,7 +874,7 @@ void handleGeneralSettings() {
 
   char ss[2];
 
-  for (signed char i = -12; i < 15; i++) {
+  for (signed char i = 0; i < sizeof(tzDescriptions)/sizeof(tzDescriptions[0]); i++) {
     itoa(i, ss, DEC);
     timezoneslist+="<option ";
     if (appConfig.timeZone == i){
@@ -882,14 +882,10 @@ void handleGeneralSettings() {
     }
     timezoneslist+= "value=\"";
     timezoneslist+=ss;
-    timezoneslist+="\">UTC ";
-    if (i>0){
-      timezoneslist+="+";
-    }
-    if (i!=0){
-      timezoneslist+=ss;
-      timezoneslist+=":00";
-    }
+    timezoneslist+="\">";
+
+    timezoneslist+= tzDescriptions[i];
+
     timezoneslist+="</option>";
     timezoneslist+="\n";
   }
@@ -944,7 +940,7 @@ void handleNetworkSettings() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/networksettings.html", "r");
   String s, htmlString, wifiList;
@@ -999,7 +995,7 @@ void handleTools() {
   if (f.available()) headerString = f.readString();
   f.close();
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   f = LittleFS.open("/tools.html", "r");
 
@@ -1046,7 +1042,7 @@ void SendHeartbeat(){
 
     if (PSclient.connected()){
 
-    time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
     const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(6) + 180;
     StaticJsonDocument<capacity> doc;
@@ -1079,15 +1075,15 @@ void SendHeartbeat(){
 
 void RefreshSunData(){
 
-  time_t localTime = myTZ.toLocal(now(), &tcr);
+  time_t localTime = timezones[appConfig.timeZone]->toLocal(now(), &tcr);
 
   sunData.Sunrise = CalculateSunData(localTime, LATITUDE, LONGITUDE, Sunrise);
   sunData.Sunset  = CalculateSunData(localTime, LATITUDE, LONGITUDE, Sunset );
 
-  localTime = myTZ.toLocal(sunData.Sunrise, &tcr);
+  localTime = timezones[appConfig.timeZone]->toLocal(sunData.Sunrise, &tcr);
   String sr = DateTimeToString(localTime);
 
-  localTime = myTZ.toLocal(sunData.Sunset, &tcr);
+  localTime = timezones[appConfig.timeZone]->toLocal(sunData.Sunset, &tcr);
   String ss = DateTimeToString(localTime);
 
   LogEvent(EVENTCATEGORIES::RefreshSunsetSunrise, 1, "Sun data calculated", "Sunrise: " + sr + " - Sunset: " + ss);
@@ -1348,7 +1344,7 @@ void setup() {
 
   Serial.println();
 
-  server.on("/", handleRoot);
+  server.on("/", handleStatus);
   server.on("/status.html", handleStatus);
   server.on("/generalsettings.html", handleGeneralSettings);
   server.on("/networksettings.html", handleNetworkSettings);
