@@ -8,6 +8,8 @@
 #define HARDWARE_VERSION "1.0"
 #define SOFTWARE_ID "Stairlight Express"
 
+#define DEBUG_SPEED 921600
+
 #define JSON_SETTINGS_SIZE (JSON_OBJECT_SIZE(11) + 270)
 #define JSON_MQTT_COMMAND_SIZE 300
 
