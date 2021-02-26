@@ -20,9 +20,10 @@ PubSubClient PSclient(wclient);
 os_timer_t heartbeatTimer;
 os_timer_t sunDataTimer;
 os_timer_t accessPointTimer;
+os_timer_t staircaseTimer;
 
 //  I2C
-PCF857x i2c_io(I2C_IO_ADDRESS, &Wire);
+PCF857x i2c_io(I2C_LED_PANEL0_ADDRESS, &Wire);
 
 //  Other global variables
 sunData_t sunData;
@@ -41,6 +42,7 @@ bool needsSunData = false;
 bool entranceLightState = false;
 bool stairlightLastState = false;
 bool ntpInitialized = false;
+bool stairlightGotSwitchedOff = false;
 
 WiFiUDP Udp;
 
@@ -84,6 +86,12 @@ void accessPointTimerCallback(void *pArg) {
 
 void heartbeatTimerCallback(void *pArg) {
   needsHeartbeat = true;
+}
+
+void StaircaseTimerCallback(void *pArg) {
+    i2c_io.write(STAIRCASELIGHT_RELAY, 1);
+    stairlightGotSwitchedOff = true;
+    os_timer_disarm(&staircaseTimer);
 }
 
 void sunDataTimerCallback(void *pArg) {
@@ -201,7 +209,7 @@ bool loadSettings(config& data) {
     appConfig.staircaseLightDelay = DEFAULT_STAIRCASE_LIGHT_DELAY;
   }
 
-  if (doc["staircaseLightDelay"]){
+  if (doc["sunriseLightOffset"]){
     appConfig.sunriseLightOffset = doc["sunriseLightOffset"];
   }
   else
@@ -209,7 +217,7 @@ bool loadSettings(config& data) {
     appConfig.sunriseLightOffset = DEFAULT_SUNRISE_LIGHT_OFFSET;
   }
 
-  if (doc["staircaseLightDelay"]){
+  if (doc["sunsetLightOffset"]){
     appConfig.sunsetLightOffset = doc["sunsetLightOffset"];
   }
   else
@@ -546,7 +554,7 @@ void handleRoot() {
 
   f = LittleFS.open("/index.html", "r");
 
-  String FirmwareVersionString = String(FIRMWARE_VERSION) + " @ " + String(__TIME__) + " - " + String(__DATE__);
+  String FirmwareVersionString = String(FIRMWARE_VERSION);
 
   String s, htmlString;
 
@@ -590,7 +598,7 @@ void handleStatus() {
 
   String FirmwareVersionString = String(FIRMWARE_VERSION);
   String htmlString, ds18b20list;
- 
+
   while (f.available()){
     s = f.readStringUntil('\n');
 
@@ -1122,46 +1130,44 @@ bool NeedsEntranceLight(){
 }
 
 void StartStaircaseLight(){
-  buttonPressedTime = millis();
-  LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
-  if (PSclient.connected()){
-    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "on", false );
-  }
+    i2c_io.write(STAIRCASELIGHT_RELAY, 0);
+    os_timer_arm(&staircaseTimer, appConfig.staircaseLightDelay * 1000, true);
+    LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
+    if (PSclient.connected()){
+        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "on", false );
+    }
 }
 
 void ScanI2C(){
-  byte error, address;
-  int nDevices;
+    byte error, address;
+    int nDevices;
 
-  Serial.println("\nScanning for I2C devices...");
+    Serial.println("\nScanning for I2C devices...");
 
-  nDevices = 0;
-  for(address = 1; address < 127; address++ )
-  {
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
+    nDevices = 0;
+    for(address = 1; address < 127; address++ ){
+        Wire.beginTransmission(address);
+        error = Wire.endTransmission();
 
-    if (error == 0)
-    {
-      Serial.print("Device ");
-      Serial.print(nDevices);
-      Serial.print(":\t0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.println(address,HEX);
+        if (error == 0){
+            Serial.print("Device ");
+            Serial.print(nDevices);
+            Serial.print(":\t0x");
+            if (address<16)
+                Serial.print("0");
+            Serial.println(address,HEX);
 
-      nDevices++;
+            nDevices++;
+        }
+        else if (error==4){
+            Serial.print("Unknow error at address 0x");
+            if (address<16)
+                Serial.print("0");
+            Serial.println(address,HEX);
+        }
     }
-    else if (error==4)
-    {
-      Serial.print("Unknow error at address 0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.println(address,HEX);
-    }
-  }
-  if (nDevices == 0)
-    Serial.println("No I2C devices found.\n");
+    if (nDevices == 0)
+        Serial.println("No I2C devices found.\n");
 
 }
 
@@ -1186,7 +1192,6 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
       digitalWrite(CONNECTION_STATUS_LED_GPIO, !digitalRead(CONNECTION_STATUS_LED_GPIO));
       delay(50);
     }
-    return;
   }
   else{
     //  It IS a JSON string
@@ -1233,18 +1238,15 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     }
 
     if ( sCommand == "ON" ){
-      if ( iChannel == 1)
-        StartStaircaseLight();
-      i2c_io.write(iChannel, 0);
-      if (PSclient.connected()){
-        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
-      }
+        if ( iChannel == 1)
+            StartStaircaseLight();
+        if (PSclient.connected()){
+            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
+        }
     }
     else if ( sCommand == "OFF" ){
-      i2c_io.write(iChannel, 1);
-      if (PSclient.connected()){
-        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", false );
-      }
+        i2c_io.write(STAIRCASELIGHT_RELAY, 1);
+        stairlightGotSwitchedOff = true;
     }
 
     //  reset
@@ -1262,130 +1264,129 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   }
 
 }
-  
 
 void setup() {
-  delay(1); //  Needed for PlatformIO serial monitor
-  Serial.begin(DEBUG_SPEED);
-  Serial.setDebugOutput(false);
-  Serial.print("\n\n\n\rBooting node:     ");
-  Serial.print(ESP.getChipId());
-  Serial.println("...");
+    delay(1); //  Needed for PlatformIO serial monitor
+    Serial.begin(DEBUG_SPEED);
+    Serial.setDebugOutput(false);
+    Serial.print("\n\n\n\rBooting node:     ");
+    Serial.print(ESP.getChipId());
+    Serial.println("...");
 
-  String FirmwareVersionString = String(FIRMWARE_VERSION) + " @ " + String(__TIME__) + " - " + String(__DATE__);
+    Serial.println("Hardware ID:      " + (String)HARDWARE_ID);
+    Serial.println("Hardware version: " + (String)HARDWARE_VERSION);
+    Serial.println("Software ID:      " + (String)SOFTWARE_ID);
+    Serial.println("Software version: " + (String)FIRMWARE_VERSION);
+    Serial.println();
 
-  Serial.println("Hardware ID:      " + (String)HARDWARE_ID);
-  Serial.println("Hardware version: " + (String)HARDWARE_VERSION);
-  Serial.println("Software ID:      " + (String)SOFTWARE_ID);
-  Serial.println("Software version: " + FirmwareVersionString);
-  Serial.println();
-
-  //  File system
-  if (!LittleFS.begin()){
-    Serial.println("Error: Failed to initialize the filesystem!");
-  }
-
-  if (!loadSettings(appConfig)) {
-    Serial.println("Failed to load config, creating default settings...");
-    defaultSettings();
-  } else {
-    Serial.println("Config loaded.");
-  }
-
-  WiFi.hostname(defaultSSID);
-  
-  //  GPIOs
-
-  //  outputs
-  pinMode(CONNECTION_STATUS_LED_GPIO, OUTPUT);
-  digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
-
-  //  I2C
-  Wire.begin(SDA_GPIO, SCL_GPIO);
-  ScanI2C();
-
-  #ifdef __debugSettings
-
-  for (size_t i = 0; i < 5; i++) {
-    i2c_io.write8(0x00);
-    delay(100);
-    i2c_io.write8(0xff);
-    delay(100);
-  }
-
-  #endif
-
-  //  OTA
-  ArduinoOTA.onStart([]() {
-    Serial.println("OTA started.");
-  });
-
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nOTA finished.");
-  });
-
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    if (progress % OTA_BLINKING_RATE == 0){
-      if (digitalRead(CONNECTION_STATUS_LED_GPIO)==HIGH)
-        digitalWrite(CONNECTION_STATUS_LED_GPIO, LOW);
-        else
-        digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
+    //  File system
+    if (!LittleFS.begin()){
+        Serial.println("Error: Failed to initialize the filesystem!");
     }
-  });
 
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Authentication failed.");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin failed.");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect failed.");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive failed.");
-    else if (error == OTA_END_ERROR) Serial.println("End failed.");
-  });
+    if (!loadSettings(appConfig)) {
+        Serial.println("Failed to load config, creating default settings...");
+        defaultSettings();
+    } else {
+        Serial.println("Config loaded.");
+    }
 
-  ArduinoOTA.begin();
+    WiFi.hostname(defaultSSID);
+    
+    //  GPIOs
 
-  Serial.println();
+    //  outputs
+    pinMode(CONNECTION_STATUS_LED_GPIO, OUTPUT);
+    digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
 
-  server.on("/", handleStatus);
-  server.on("/status.html", handleStatus);
-  server.on("/generalsettings.html", handleGeneralSettings);
-  server.on("/networksettings.html", handleNetworkSettings);
-  server.on("/staircaselighttimer.html", handleStaircaseLightTimer);
-  server.on("/entrancelight.html", handleEntranceLight);
-  server.on("/tools.html", handleTools);
-  server.on("/login.html", handleLogin);
+    //  I2C
+    Wire.begin(SDA_GPIO, SCL_GPIO);
+    ScanI2C();
 
-  server.onNotFound(handleNotFound);
+    #ifdef __debugSettings
 
-  //  Web server
-  if (MDNS.begin("esp8266")) {
-    Serial.println("MDNS responder started.");
-  }
+    for (size_t i = 0; i < 5; i++) {
+        i2c_io.write8(0x00);
+        delay(100);
+        i2c_io.write8(0xff);
+        delay(100);
+    }
 
-  //  Start HTTP (web) server
-  server.begin();
-  Serial.println("HTTP server started.");
-
-  //  Authenticate HTTP requests
-  const char * headerkeys[] = {"User-Agent","Cookie"} ;
-  size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
-  server.collectHeaders(headerkeys, headerkeyssize );
-
-  //  Timers
-  os_timer_setfn(&heartbeatTimer, heartbeatTimerCallback, NULL);
-  os_timer_arm(&heartbeatTimer, appConfig.heartbeatInterval * 1000, true);
-
-  #ifdef _use_local_sun_data
-  os_timer_setfn(&sunDataTimer, sunDataTimerCallback, NULL);
-  os_timer_arm(&sunDataTimer, 60 * 60 * 1000, true);
   #endif
 
-  //  Randomizer
-  SetRandomSeed();
+    //  OTA
+    ArduinoOTA.onStart([]() {
+        Serial.println("OTA started.");
+    });
 
-  // Set the initial connection state
-  connectionState = STATE_CHECK_WIFI_CONNECTION;
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nOTA finished.");
+    });
+
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+        if (progress % OTA_BLINKING_RATE == 0){
+        if (digitalRead(CONNECTION_STATUS_LED_GPIO)==HIGH)
+            digitalWrite(CONNECTION_STATUS_LED_GPIO, LOW);
+            else
+            digitalWrite(CONNECTION_STATUS_LED_GPIO, HIGH);
+        }
+    });
+
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Authentication failed.");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin failed.");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect failed.");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive failed.");
+        else if (error == OTA_END_ERROR) Serial.println("End failed.");
+    });
+
+    ArduinoOTA.begin();
+
+    Serial.println();
+
+    server.on("/", handleStatus);
+    server.on("/status.html", handleStatus);
+    server.on("/generalsettings.html", handleGeneralSettings);
+    server.on("/networksettings.html", handleNetworkSettings);
+    server.on("/staircaselighttimer.html", handleStaircaseLightTimer);
+    server.on("/entrancelight.html", handleEntranceLight);
+    server.on("/tools.html", handleTools);
+    server.on("/login.html", handleLogin);
+
+    server.onNotFound(handleNotFound);
+
+    //  Web server
+    if (MDNS.begin("esp8266")) {
+        Serial.println("MDNS responder started.");
+    }
+
+    //  Start HTTP (web) server
+    server.begin();
+    Serial.println("HTTP server started.");
+
+    //  Authenticate HTTP requests
+    const char * headerkeys[] = {"User-Agent","Cookie"} ;
+    size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
+    server.collectHeaders(headerkeys, headerkeyssize );
+
+    //  Timers
+    os_timer_setfn(&heartbeatTimer, heartbeatTimerCallback, NULL);
+    os_timer_arm(&heartbeatTimer, appConfig.heartbeatInterval * 1000, true);
+
+    os_timer_setfn(&staircaseTimer, StaircaseTimerCallback, NULL);
+
+    #ifdef _use_local_sun_data
+    os_timer_setfn(&sunDataTimer, sunDataTimerCallback, NULL);
+    os_timer_arm(&sunDataTimer, 60 * 60 * 1000, true);
+    #endif
+
+    //  Randomizer
+    SetRandomSeed();
+
+    // Set the initial connection state
+    connectionState = STATE_CHECK_WIFI_CONNECTION;
 
 }
 
@@ -1563,25 +1564,18 @@ void loop(){
 
         if ( (inputPattern & INPUT_MASK_1) == 0 ){
           if (millis() - buttonPressedTime > BUTTON_DEBOUNCE_DELAY){
-            i2c_io.write(1, 0);
             StartStaircaseLight();
           }
         }
 
-        if ( millis() - buttonPressedTime < appConfig.staircaseLightDelay * 1000 ){
-          i2c_io.write(STAIRCASELIGHT_RELAY, 0);
-          stairlightLastState = true;
-        }
-        else{
-          i2c_io.write(STAIRCASELIGHT_RELAY, 1);
-          if ( stairlightLastState ){
-            LogEvent(EVENTCATEGORIES::StaircaseLight, 2, "Staircaselights", "0");
+        if (stairlightGotSwitchedOff){
             if (PSclient.connected()){
-              PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", false );
+                PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", false );
+                LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", "off");
+                stairlightGotSwitchedOff = false;
             }
-          }
-          stairlightLastState = false;
         }
+
 
         if (PSclient.connected()){
           PSclient.loop();
