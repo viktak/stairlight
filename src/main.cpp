@@ -1237,16 +1237,30 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
       iChannel = 3;
     }
 
+
     if ( sCommand == "ON" ){
-        if ( iChannel == 1)
+        if ( iChannel == 1){
             StartStaircaseLight();
-        if (PSclient.connected()){
-            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
         }
+        else{
+            if (PSclient.connected()){
+                PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
+            }
+        }
+            
     }
     else if ( sCommand == "OFF" ){
-        i2c_io.write(STAIRCASELIGHT_RELAY, 1);
-        stairlightGotSwitchedOff = true;
+        if ( iChannel == 0){
+            i2c_io.write(ENTRANCELIGHT_RELAY, 1);
+            if (PSclient.connected()){
+                PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER0").c_str(), "off", false );
+                LogEvent(EVENTCATEGORIES::EntranceLight, 1, "EntranceLight", "off");
+            }
+        }
+        else if ( iChannel == 1){
+            i2c_io.write(STAIRCASELIGHT_RELAY, 1);
+            stairlightGotSwitchedOff = true;
+        }
     }
 
     //  reset
