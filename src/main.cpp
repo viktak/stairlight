@@ -1239,28 +1239,56 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
 
     if ( sCommand == "ON" ){
-        if ( iChannel == 1){
-            StartStaircaseLight();
+        switch ( iChannel ){
+        case 0:
+            i2c_io.write(ENTRANCELIGHT_RELAY, 0);
+            LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "on");
+            break;
+        case 1:
+            i2c_io.write(STAIRCASELIGHT_RELAY, 0);
+            os_timer_arm(&staircaseTimer, appConfig.staircaseLightDelay * 1000, true);
+            LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
+            break;
+        case 2:
+            i2c_io.write(2, 0);
+            break;
+        case 3:
+            i2c_io.write(3, 0);
+            break;
+        default:
+            break;
         }
-        else{
-            if (PSclient.connected()){
-                PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
-            }
+
+        if (PSclient.connected()){
+            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
         }
             
     }
     else if ( sCommand == "OFF" ){
-        if ( iChannel == 0){
+        switch ( iChannel ){
+        case 0:
             i2c_io.write(ENTRANCELIGHT_RELAY, 1);
-            if (PSclient.connected()){
-                PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER0").c_str(), "off", false );
-                LogEvent(EVENTCATEGORIES::EntranceLight, 1, "EntranceLight", "off");
-            }
-        }
-        else if ( iChannel == 1){
+            LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "off");
+            break;
+        case 1:
             i2c_io.write(STAIRCASELIGHT_RELAY, 1);
             stairlightGotSwitchedOff = true;
+            LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", "off");
+            break;
+        case 2:
+            i2c_io.write(2, 1);
+            break;
+        case 3:
+            i2c_io.write(3, 1);
+            break;
+        default:
+            break;
         }
+
+        if (PSclient.connected()){
+            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", false );
+        }
+        
     }
 
     //  reset
