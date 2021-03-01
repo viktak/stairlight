@@ -23,7 +23,7 @@ os_timer_t accessPointTimer;
 os_timer_t staircaseTimer;
 
 //  I2C
-PCF857x i2c_io(I2C_LED_PANEL0_ADDRESS, &Wire);
+PCF857x i2c_relays(I2C_LED_PANEL0_ADDRESS, &Wire);
 
 //  Other global variables
 sunData_t sunData;
@@ -40,9 +40,8 @@ enum CONNECTION_STATE connectionState;
 bool needsHeartbeat = false;
 bool needsSunData = false;
 bool entranceLightState = false;
-bool stairlightLastState = false;
+bool stairlightExpired = false;
 bool ntpInitialized = false;
-bool stairlightGotSwitchedOff = false;
 
 WiFiUDP Udp;
 
@@ -89,9 +88,7 @@ void heartbeatTimerCallback(void *pArg) {
 }
 
 void StaircaseTimerCallback(void *pArg) {
-    i2c_io.write(STAIRCASELIGHT_RELAY, 1);
-    stairlightGotSwitchedOff = true;
-    os_timer_disarm(&staircaseTimer);
+    stairlightExpired = true;
 }
 
 void sunDataTimerCallback(void *pArg) {
@@ -1130,7 +1127,7 @@ bool NeedsEntranceLight(){
 }
 
 void StartStaircaseLight(){
-    i2c_io.write(STAIRCASELIGHT_RELAY, 0);
+    i2c_relays.write(STAIRCASELIGHT_RELAY, 0);
     os_timer_arm(&staircaseTimer, appConfig.staircaseLightDelay * 1000, true);
     LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
     if (PSclient.connected()){
@@ -1201,95 +1198,61 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     Serial.println();
     #endif
 
-
+    String sKey;
+    char c[1];
     String sCommand;
-    uint8_t iChannel;
-    
-    //  Relay0 - Entrance lights
-    if (doc.containsKey("POWER0")){
-      const char* myKey = doc["POWER0"];
-      sCommand = myKey;
-      sCommand.toUpperCase();
-      iChannel = 0;
-    }
 
-    //  Relay1 - Staircase lights
-    if (doc.containsKey("POWER1")){
-      const char* myKey = doc["POWER1"];
-      sCommand = myKey;
-      sCommand.toUpperCase();
-      iChannel = 1;
-    }
+    for (size_t i = 0; i < 8; i++){
+         sKey = "POWER";
+        itoa(i, c, DEC);
+        sKey+=c;
 
-    //  Relay2 - 
-    if (doc.containsKey("POWER2")){
-      const char* myKey = doc["POWER2"];
-      sCommand = myKey;
-      sCommand.toUpperCase();
-      iChannel = 2;
-    }
+        if (doc.containsKey(sKey)){
+            const char* myKey = doc[sKey];
+            sCommand = myKey;
+            sCommand.toUpperCase();
 
-    //  Relay3 - 
-    if (doc.containsKey("POWER3")){
-      const char* myKey = doc["POWER3"];
-      sCommand = myKey;
-      sCommand.toUpperCase();
-      iChannel = 3;
-    }
+            if (sCommand == "ON"){
+                i2c_relays.write(i, 0);     //  Switch on relay
 
+                switch ( i ){
+                case ENTRANCELIGHT_RELAY:  //  if it is the boiler
+                    LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "on");
+                    break;
+                case STAIRCASELIGHT_RELAY:
+                    os_timer_arm(&staircaseTimer, appConfig.staircaseLightDelay * 1000, true);
+                    if (PSclient.connected())
+                        PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)i + String("/DURATION")).c_str(), ((String)appConfig.staircaseLightDelay).c_str(), false );
+                    LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
+                    break;
+                default:
+                    break;
+                }
+                if (PSclient.connected()){
+                    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)i).c_str(), "on", false );
+                }
+            } else if (sCommand == "OFF"){
+                i2c_relays.write(i, 1);     //  Switch off relay
+                if (PSclient.connected())
+                    PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)i).c_str(), "off", false );
 
-    if ( sCommand == "ON" ){
-        switch ( iChannel ){
-        case 0:
-            i2c_io.write(ENTRANCELIGHT_RELAY, 0);
-            LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "on");
-            break;
-        case 1:
-            i2c_io.write(STAIRCASELIGHT_RELAY, 0);
-            os_timer_arm(&staircaseTimer, appConfig.staircaseLightDelay * 1000, true);
-            LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", String(appConfig.staircaseLightDelay));
-            break;
-        case 2:
-            i2c_io.write(2, 0);
-            break;
-        case 3:
-            i2c_io.write(3, 0);
-            break;
-        default:
-            break;
+                switch ( i ){
+                case 0:
+                    LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "off");
+                    break;
+                case 1:
+                    stairlightExpired = true;
+                    break;
+                default:
+                    break;
+                }
+                
+            }
         }
-
-        if (PSclient.connected()){
-            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "on", false );
-        }
-            
     }
-    else if ( sCommand == "OFF" ){
-        switch ( iChannel ){
-        case 0:
-            i2c_io.write(ENTRANCELIGHT_RELAY, 1);
-            LogEvent(EVENTCATEGORIES::EntranceLight, 1, "Entrancelight", "off");
-            break;
-        case 1:
-            i2c_io.write(STAIRCASELIGHT_RELAY, 1);
-            stairlightGotSwitchedOff = true;
-            LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", "off");
-            break;
-        case 2:
-            i2c_io.write(2, 1);
-            break;
-        case 3:
-            i2c_io.write(3, 1);
-            break;
-        default:
-            break;
-        }
 
-        if (PSclient.connected()){
-            PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER" + (String)iChannel).c_str(), "off", false );
-        }
         
-    }
+  
 
     //  reset
     if (doc.containsKey("reset")){
@@ -1348,9 +1311,9 @@ void setup() {
     #ifdef __debugSettings
 
     for (size_t i = 0; i < 5; i++) {
-        i2c_io.write8(0x00);
+        i2c_relays.write8(0x00);
         delay(100);
-        i2c_io.write8(0xff);
+        i2c_relays.write8(0xff);
         delay(100);
     }
 
@@ -1583,7 +1546,7 @@ void loop(){
             if (PSclient.connected()){
               PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/POWER0", "on" ).set_qos(0));
             }
-          i2c_io.write(ENTRANCELIGHT_RELAY, 1);
+          i2c_relays.write(ENTRANCELIGHT_RELAY, 1);
           entranceLightState = true;
           }
         }
@@ -1594,12 +1557,12 @@ void loop(){
               PSclient.publish(MQTT::Publish(MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + String(ESP.getChipId()) + "/POWER0", "off" ).set_qos(0));
             }
           }
-          i2c_io.write(ENTRANCELIGHT_RELAY, 0);
+          i2c_relays.write(ENTRANCELIGHT_RELAY, 0);
           entranceLightState = false;
         }
 #endif
 
-        inputPattern = i2c_io.read8();
+        inputPattern = i2c_relays.read8();
         //Serial.println(inputPattern, BIN);
 
         //  Staircase lights
@@ -1610,12 +1573,14 @@ void loop(){
           }
         }
 
-        if (stairlightGotSwitchedOff){
-            if (PSclient.connected()){
+        if ( stairlightExpired ){
+            i2c_relays.write(STAIRCASELIGHT_RELAY, 1);
+            os_timer_disarm(&staircaseTimer);
+            if (PSclient.connected())
                 PSclient.publish((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/RESULT/POWER1").c_str(), "off", false );
-                LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", "off");
-                stairlightGotSwitchedOff = false;
-            }
+
+            LogEvent(EVENTCATEGORIES::StaircaseLight, 1, "Staircaselights", "off");
+            stairlightExpired = false;
         }
 
 
