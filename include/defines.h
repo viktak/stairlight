@@ -24,6 +24,7 @@
 #define STAIRCASELIGHT_RELAY 1
 
 #define I2C_LED_PANEL0_ADDRESS 0x3F
+// #define I2C_LED_PANEL0_ADDRESS 0x27
 
 //  Input masks
 #define INPUT_MASK_0  0b10000000
