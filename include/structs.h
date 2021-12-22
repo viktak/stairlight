@@ -5,7 +5,7 @@ struct config{
   char friendlyName[30];
   uint heartbeatInterval;
 
-  signed char timeZone;
+  unsigned long timeZone;
 
   char mqttServer[64];
   int mqttPort;

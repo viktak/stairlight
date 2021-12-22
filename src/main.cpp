@@ -222,10 +222,6 @@ bool loadSettings(config& data) {
     appConfig.sunsetLightOffset = DEFAULT_SUNSET_LIGHT_OFFSET;
   }
 
-  String ma = WiFi.macAddress();
-  ma.replace(":","");
-  sprintf(defaultSSID, "%s-%s", appConfig.mqttTopic, ma.substring(6, 12).c_str());
-
   return true;
 }
 
@@ -387,7 +383,7 @@ time_t CalculateSunData(time_t time, double_t latitude, double_t longitude, sunR
   //  2. convert the longitude to hour value and calculate an approximate time
   double lngHour = longitude / 15;
 
-  double t;
+  double t = 0;
   switch (SunEvent) {
     case Sunrise:
       t = N + ((6 - lngHour) / 24);
@@ -429,7 +425,7 @@ time_t CalculateSunData(time_t time, double_t latitude, double_t longitude, sunR
   if (cosH < -1) return -1;
 
   //  7b. finish calculating H and convert into hours
-  double H;
+  double H = 0;
   switch (SunEvent) {
     case Sunrise:
       H = 360 - R2D * acos(cosH);
@@ -841,24 +837,27 @@ void handleGeneralSettings() {
 
     //  MQTT settings
     if (server.hasArg("mqttbroker")){
-      if ((String)appConfig.mqttServer != server.arg("mqttbroker"))
+      if ((String)appConfig.mqttServer != server.arg("mqttbroker")){
         mqttDirty = true;
         sprintf(appConfig.mqttServer, "%s", server.arg("mqttbroker").c_str());
         LogEvent(EVENTCATEGORIES::MqttParamChange, 1, "New MQTT broker", appConfig.mqttServer);
+      }
     }
 
     if (server.hasArg("mqttport")){
-      if (appConfig.mqttPort != atoi(server.arg("mqttport").c_str()))
+      if (appConfig.mqttPort != atoi(server.arg("mqttport").c_str())){
         mqttDirty = true;
-      appConfig.mqttPort = atoi(server.arg("mqttport").c_str());
-      LogEvent(EVENTCATEGORIES::MqttParamChange, 2, "New MQTT port", server.arg("mqttport").c_str());
+        appConfig.mqttPort = atoi(server.arg("mqttport").c_str());
+        LogEvent(EVENTCATEGORIES::MqttParamChange, 2, "New MQTT port", server.arg("mqttport").c_str());
+      }
     }
 
     if (server.hasArg("mqtttopic")){
-      if ((String)appConfig.mqttTopic != server.arg("mqtttopic"))
+      if ((String)appConfig.mqttTopic != server.arg("mqtttopic")){
         mqttDirty = true;
         sprintf(appConfig.mqttTopic, "%s", server.arg("mqtttopic").c_str());
         LogEvent(EVENTCATEGORIES::MqttParamChange, 1, "New MQTT topic", appConfig.mqttTopic);
+      }
     }
 
     if (mqttDirty)
@@ -882,7 +881,7 @@ void handleGeneralSettings() {
 
   char ss[2];
 
-  for (signed char i = 0; i < sizeof(tzDescriptions)/sizeof(tzDescriptions[0]); i++) {
+  for (unsigned long i = 0; i < sizeof(tzDescriptions)/sizeof(tzDescriptions[0]); i++) {
     itoa(i, ss, DEC);
     timezoneslist+="<option ";
     if (appConfig.timeZone == i){
@@ -1466,6 +1465,7 @@ void loop(){
           WiFi.mode(WIFI_STA);
 
           // Start connection process
+          WiFi.hostname((String)appConfig.mqttTopic);
           WiFi.begin(appConfig.ssid, appConfig.password);
 
           // Initialize iteration counter
@@ -1491,6 +1491,8 @@ void loop(){
           Serial.println(" Success!");
           Serial.print("IP address: ");
           Serial.println(WiFi.localIP());
+          if (MDNS.begin(appConfig.mqttTopic)) debugln("MDNS responder started.");
+
           connectionState = STATE_CHECK_INTERNET_CONNECTION;
         }
         break;
@@ -1522,7 +1524,7 @@ void loop(){
 
         if (!PSclient.connected()) {
           PSclient.setServer(appConfig.mqttServer, appConfig.mqttPort);
-          if (PSclient.connect(defaultSSID, (MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), 0, true, "offline" )){
+          if (PSclient.connect(appConfig.mqttTopic, (MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/STATE").c_str(), 0, true, "offline" )){
             PSclient.setCallback(mqtt_callback);
 
             PSclient.subscribe((MQTT_CUSTOMER + String("/") + MQTT_PROJECT + String("/") + appConfig.mqttTopic + "/cmnd").c_str(), 0);
@@ -1563,7 +1565,6 @@ void loop(){
 #endif
 
         inputPattern = i2c_relays.read8();
-        //Serial.println(inputPattern, BIN);
 
         //  Staircase lights
 

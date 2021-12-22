@@ -2,6 +2,9 @@
 #define INCLUDES_H
 
 #include "version.h"
+
+#include "../../../ActoSenso/Nodes/_common/debug.h"
+
 #include "defines.h"
 #include "../../_common/defines.h"
 
